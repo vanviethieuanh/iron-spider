@@ -1,9 +1,5 @@
-use std::{num::NonZero, time::Duration};
-
-use governor::Quota;
 use iron_spider::{
     config::Configuration,
-    downloader::Downloader,
     engine::Engine,
     pipeline::{Pipeline, PipelineManager},
     request::Request,
@@ -12,7 +8,6 @@ use iron_spider::{
     spider::{Spider, SpiderResult},
 };
 use regex::Regex;
-use reqwest::Client;
 use scraper::{Html, Selector};
 use tracing::{Level, info};
 

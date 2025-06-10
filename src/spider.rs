@@ -12,7 +12,7 @@ pub enum SpiderResult {
     None,
 }
 
-pub trait Spider {
+pub trait Spider: Send + Sync {
     fn start_urls(&self) -> Vec<Request>;
     fn name(&self) -> &str;
     fn parse(response: Response) -> SpiderResult

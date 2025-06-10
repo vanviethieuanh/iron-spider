@@ -3,11 +3,11 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use crate::request::Request;
 
 #[async_trait::async_trait]
-pub trait Scheduler {
+pub trait Scheduler: Send + Sync {
     async fn dequeue(&mut self) -> Option<Request>;
     fn is_empty(&self) -> bool;
     fn sender(&self) -> UnboundedSender<Request>;
-    fn close(&mut self);
+    fn close_init_sender(&mut self);
 }
 
 // NOTE: Simple Scheduler
@@ -40,7 +40,7 @@ impl Scheduler for SimpleScheduler {
     fn is_empty(&self) -> bool {
         self.receiver.is_empty()
     }
-    fn close(&mut self) {
+    fn close_init_sender(&mut self) {
         self.sender.take();
     }
 }

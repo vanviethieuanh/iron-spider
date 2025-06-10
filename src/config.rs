@@ -13,9 +13,7 @@ impl Default for Configuration {
         Self {
             download_delay_ms: 0,
             downloader_request_quota: None,
-            user_agent: Some(
-                "IronSpider/0.1 (+https://github.com/vanviethieuanh/iron-spider)".to_string(),
-            ),
+            user_agent: Some("IronSpider/0.0.1".to_string()),
         }
     }
 }
