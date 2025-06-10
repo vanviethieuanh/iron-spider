@@ -132,8 +132,13 @@ async fn main() {
         item
     });
     let transform_article_pipe = Pipeline::new(|item: Option<ArticleItem>| {
-        info!("Transformed item: {:?}", item);
-        item
+        info!("Transforming item: {:?}", item);
+        let transformed = item.map(|mut i| {
+            i.author = "Transformed author".to_string();
+            i
+        });
+
+        transformed
     });
 
     let mut pipeline_manager = PipelineManager::new();
