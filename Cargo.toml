@@ -10,3 +10,5 @@ reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate", "
 scraper = "0.23.1"
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.5.2", features = ["limit"] }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"

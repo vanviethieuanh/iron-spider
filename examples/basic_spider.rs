@@ -13,6 +13,7 @@ use iron_spider::{
 use regex::Regex;
 use reqwest::Client;
 use scraper::{Html, Selector};
+use tracing::{Level, info};
 
 #[derive(Debug)]
 pub struct ArticleItem {
@@ -122,12 +123,16 @@ impl Spider for ExampleSpider {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO) // Or "debug" for more verbose logs
+        .init();
+
     let scheduler = Box::new(SimpleScheduler::new());
     let spiders: Vec<Box<dyn Spider>> = vec![Box::new(ExampleSpider)];
     let mut pipeline_manager = PipelineManager::new();
     pipeline_manager.add_pipeline::<ArticleItem>(
         Pipeline::new(|i: &ArticleItem| {
-            println!("Article item pipeline: {:?}", i);
+            info!("Article item pipeline: {:?}", i);
         }),
         30,
     );

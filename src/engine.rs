@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use tokio::task::JoinSet;
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     config::Configuration,
@@ -38,14 +39,14 @@ impl Engine {
     }
 
     pub async fn start(&mut self) {
-        println!("Starting engine with {} spiders", self.spiders.len(),);
+        info!("Starting engine with {} spiders", self.spiders.len());
 
         let scheduler_sender = self.scheduler.sender();
         for spider in &self.spiders {
             for req in spider.start_urls() {
-                scheduler_sender
-                    .send(req)
-                    .expect("Failed to queue request to scheduler.");
+                if let Err(e) = scheduler_sender.send(req) {
+                    error!("Failed to queue request to scheduler: {:?}", e);
+                }
             }
         }
         self.scheduler.close();
@@ -56,7 +57,7 @@ impl Engine {
                 maybe_request = self.scheduler.dequeue() => {
                     match maybe_request {
                         Some(request) => {
-                            println!("Dequeued: {}", request.url);
+                            debug!("Dequeued: {}", request.url);
 
                             let pipelines = Arc::clone(&self.pipelines);
                             let downloader = Arc::clone(&self.downloader);
@@ -70,7 +71,7 @@ impl Engine {
                                     SpiderResult::Requests(requests) => {
                                         for req in requests {
                                             if sender.send(req).is_err() {
-                                                eprintln!("Failed to enqueue request");
+                                                warn!("Failed to enqueue request");
                                             }
                                         }
                                     }
@@ -82,7 +83,7 @@ impl Engine {
                                     SpiderResult::Both { requests, items } => {
                                         for req in requests {
                                             if sender.send(req).is_err() {
-                                                eprintln!("Failed to enqueue request");
+                                                warn!("Failed to enqueue request");
                                             }
                                         }
                                         for item in items {
@@ -94,21 +95,23 @@ impl Engine {
                             });
                         }
                         None => {
-                            println!("Scheduler closed and queue is empty");
+                            info!("Scheduler closed and queue is empty");
                         }
                     }
                 }
 
                 Some(result) = task_set.join_next() => {
-                    match result{
-                        Ok(_) => { println!("task finised");
+                    match result {
+                        Ok(_) => {
+                            debug!("Task finished");
                             if task_set.is_empty() && self.downloader.is_idle() && self.scheduler.is_empty() {
-                                println!("empty");
+                                info!("No more tasks, downloader idle, and scheduler empty — exiting loop");
                                 break;
                             }
-
                         },
-                        Err(_) => todo!(),
+                        Err(e) => {
+                            error!("Task failed: {:?}", e);
+                        },
                     }
                 }
 
@@ -117,6 +120,6 @@ impl Engine {
                 }
             }
         }
-        println!("Engine finished crawling.");
+        info!("Engine finished crawling.");
     }
 }
