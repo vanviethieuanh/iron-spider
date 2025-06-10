@@ -126,13 +126,19 @@ async fn main() {
 
     let scheduler = Box::new(SimpleScheduler::new());
     let spiders: Vec<Box<dyn Spider>> = vec![Box::new(ExampleSpider)];
+
+    let print_article_pipe = Pipeline::new(|item: Option<ArticleItem>| {
+        info!("Article item pipeline: {:?}", item);
+        item
+    });
+    let transform_article_pipe = Pipeline::new(|item: Option<ArticleItem>| {
+        info!("Transformed item: {:?}", item);
+        item
+    });
+
     let mut pipeline_manager = PipelineManager::new();
-    pipeline_manager.add_pipeline::<ArticleItem>(
-        Pipeline::new(|i: &ArticleItem| {
-            info!("Article item pipeline: {:?}", i);
-        }),
-        30,
-    );
+    pipeline_manager.add_pipeline::<ArticleItem>(print_article_pipe, 30);
+    pipeline_manager.add_pipeline::<ArticleItem>(transform_article_pipe, 10);
 
     let mut engine = Engine::new(
         scheduler,

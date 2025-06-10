@@ -3,25 +3,30 @@ use std::{
     collections::HashMap,
 };
 
+use tracing::warn;
+
 pub struct Pipeline {
     pub type_id: TypeId,
-    pub process: Box<dyn Fn(&dyn Any) + Send + Sync>,
+    pub process: Box<dyn Fn(Option<Box<dyn Any>>) -> Option<Box<dyn Any>> + Send + Sync>,
 }
 
 impl Pipeline {
-    pub fn new<T: 'static + Send + Sync>(handler: impl Fn(&T) + Send + Sync + 'static) -> Self {
+    pub fn new<T>(handler: impl Fn(Option<T>) -> Option<T> + Send + Sync + 'static) -> Self
+    where
+        T: 'static + Send + Sync,
+    {
         let type_id = TypeId::of::<T>();
-        let process = Box::new(move |any: &dyn Any| {
-            if let Some(typed) = any.downcast_ref::<T>() {
-                handler(typed);
-            }
+        let process = Box::new(move |item: Option<Box<dyn Any>>| {
+            let typed: Option<T> = item.and_then(|b| b.downcast::<T>().ok().map(|b| *b));
+            let result = handler(typed);
+            result.map(|r| Box::new(r) as Box<dyn Any>)
         });
 
         Self { type_id, process }
     }
 
-    pub fn try_process(&self, item: &dyn Any) {
-        (self.process)(item);
+    pub fn try_process(&self, item: Option<Box<dyn Any>>) -> Option<Box<dyn Any>> {
+        (self.process)(item)
     }
 }
 
@@ -50,12 +55,14 @@ impl PipelineManager {
 
     pub fn process_item(&self, item: Box<dyn Any>) {
         let type_id = item.as_ref().type_id();
+        let mut current: Option<Box<dyn Any>> = Some(item);
+
         if let Some(pipes) = self.pipelines.get(&type_id) {
             for pp in pipes {
-                pp.pipeline.try_process(&*item); // Still pass as reference
+                current = pp.pipeline.try_process(current);
             }
         } else {
-            eprintln!("No pipeline for type {:?}", type_id);
+            warn!("No pipeline for type {:?}", type_id);
         }
     }
 }
