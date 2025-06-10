@@ -50,7 +50,7 @@ impl Engine {
         }
         self.scheduler.close();
 
-        let mut join_set = JoinSet::new();
+        let mut task_set = JoinSet::new();
         loop {
             tokio::select! {
                 maybe_request = self.scheduler.dequeue() => {
@@ -62,7 +62,7 @@ impl Engine {
                             let downloader = Arc::clone(&self.downloader);
                             let sender = scheduler_sender.clone();
 
-                            join_set.spawn(async move {
+                            task_set.spawn(async move {
                                 let response = downloader.fetch(&request).await;
                                 let result = (request.callback)(response);
 
@@ -99,10 +99,10 @@ impl Engine {
                     }
                 }
 
-                Some(result) = join_set.join_next() => {
+                Some(result) = task_set.join_next() => {
                     match result{
                         Ok(_) => { println!("task finised");
-                             if join_set.is_empty() && self.downloader.is_idle() && self.scheduler.is_empty() {
+                            if task_set.is_empty() && self.downloader.is_idle() && self.scheduler.is_empty() {
                                 println!("empty");
                                 break;
                             }
