@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use reqwest::Client;
-use tokio::{sync::mpsc::UnboundedSender, task::JoinSet};
+use tokio::task::JoinSet;
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -14,16 +14,17 @@ use crate::{
 };
 
 pub struct Engine {
-    scheduler: Box<dyn Scheduler>,
+    scheduler: Box<dyn Scheduler + Send + Sync>,
     spiders: Vec<Box<dyn Spider>>,
     pipelines: Arc<PipelineManager>,
     config: Configuration,
     downloader: Arc<Downloader>,
+    tasks: JoinSet<()>,
 }
 
 impl Engine {
     pub fn new(
-        scheduler: Box<dyn Scheduler>,
+        scheduler: Box<dyn Scheduler + Send + Sync>,
         spiders: Vec<Box<dyn Spider>>,
         pipelines: PipelineManager,
         config: Option<Configuration>,
@@ -38,6 +39,7 @@ impl Engine {
             pipelines: Arc::new(pipelines),
             config,
             downloader: Arc::new(Downloader::new(Client::new(), downloader_request_quota)),
+            tasks: JoinSet::new(),
         }
     }
 
@@ -52,89 +54,88 @@ impl Engine {
         }
     }
 
-    async fn handle_request(
-        request: Request,
-        downloader: Arc<Downloader>,
-        pipelines: Arc<PipelineManager>,
-        sender: UnboundedSender<Request>,
-    ) {
-        let response = downloader.fetch(&request).await;
-        let result = (request.callback)(response);
+    fn spawn_handle_request(&mut self, request: Request) {
+        let pipelines = Arc::clone(&self.pipelines);
+        let downloader = Arc::clone(&self.downloader);
+        let sender = self.scheduler.sender();
 
-        match result {
-            SpiderResult::Requests(requests) => {
-                for req in requests {
-                    if sender.send(req).is_err() {
-                        warn!("Failed to enqueue request");
+        self.tasks.spawn(async move {
+            let response = downloader.fetch(&request).await;
+            let result = (request.callback)(response);
+
+            match result {
+                SpiderResult::Requests(requests) => {
+                    for req in requests {
+                        if sender.send(req).is_err() {
+                            warn!("Failed to enqueue request");
+                        }
                     }
                 }
-            }
-            SpiderResult::Items(items) => {
-                for item in items {
-                    pipelines.process_item(item);
-                }
-            }
-            SpiderResult::Both { requests, items } => {
-                for req in requests {
-                    if sender.send(req).is_err() {
-                        warn!("Failed to enqueue request");
+                SpiderResult::Items(items) => {
+                    for item in items {
+                        pipelines.process_item(item);
                     }
                 }
-                for item in items {
-                    pipelines.process_item(item);
+                SpiderResult::Both { requests, items } => {
+                    for req in requests {
+                        if sender.send(req).is_err() {
+                            warn!("Failed to enqueue request");
+                        }
+                    }
+                    for item in items {
+                        pipelines.process_item(item);
+                    }
                 }
+                SpiderResult::None => {}
             }
-            SpiderResult::None => {}
-        }
+        });
+    }
+
+    pub fn completed(&self) -> bool {
+        self.tasks.is_empty() && self.downloader.is_idle() && self.scheduler.is_empty()
     }
 
     pub async fn start(&mut self) {
         info!("Starting engine with {} spiders", self.spiders.len());
 
-        let scheduler_sender = self.scheduler.sender();
         self.enqueue_start_urls();
-        self.scheduler.close_init_sender();
-
-        let mut task_set = JoinSet::new();
         loop {
             tokio::select! {
                 maybe_request = self.scheduler.dequeue() => {
                     match maybe_request {
                         Some(request) => {
                             debug!("Dequeued: {}", request.url);
-
-                            let pipelines = Arc::clone(&self.pipelines);
-                            let downloader = Arc::clone(&self.downloader);
-                            let sender = scheduler_sender.clone();
-
-                            task_set.spawn(Self::handle_request(request, downloader, pipelines, sender));
+                            self.spawn_handle_request(request);
                         }
                         None => {
-                            info!("Scheduler closed and queue is empty");
+                            if self.completed() {
+                                info!("No more tasks, downloader idle, and scheduler empty — exiting loop");
+                                break;
+                            }
                         }
                     }
                 }
 
-                Some(result) = task_set.join_next() => {
+
+                Some(result) = self.tasks.join_next() => {
                     match result {
                         Ok(_) => {
                             debug!("Task finished");
-                            if task_set.is_empty() && self.downloader.is_idle() && self.scheduler.is_empty() {
-                                info!("No more tasks, downloader idle, and scheduler empty — exiting loop");
-                                break;
-                            }
                         },
                         Err(e) => {
                             error!("Task failed: {:?}", e);
                         },
                     }
-                }
 
-                else => {
-                    break;
+                    if self.completed() {
+                        info!("No more tasks, downloader idle, and scheduler empty — exiting loop");
+                        break;
+                    }
                 }
             }
         }
+
+        self.scheduler.close_init_sender();
         info!("Engine finished crawling.");
     }
 }

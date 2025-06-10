@@ -24,6 +24,7 @@ fn extract_number(s: &str) -> Option<u32> {
     let caps = re.find(s)?;
     caps.as_str().parse::<u32>().ok()
 }
+
 impl ExampleSpider {
     fn parse_article_html(html: &str) -> Option<ArticleItem> {
         let document = Html::parse_document(html);
