@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use reqwest::Client;
 use tokio::task::JoinSet;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     config::Configuration,
@@ -25,16 +26,16 @@ impl Engine {
         spiders: Vec<Box<dyn Spider>>,
         pipelines: PipelineManager,
         config: Option<Configuration>,
-        downloader: Downloader,
     ) -> Self {
         let config = config.unwrap_or(Configuration::default());
+        let downloader_request_quota = config.downloader_request_quota;
 
         Self {
             scheduler,
             spiders,
             pipelines: Arc::new(pipelines),
             config,
-            downloader: Arc::new(downloader),
+            downloader: Arc::new(Downloader::new(Client::new(), downloader_request_quota)),
         }
     }
 

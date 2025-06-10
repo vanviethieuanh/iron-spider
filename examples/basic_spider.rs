@@ -1,5 +1,6 @@
-use std::time::Duration;
+use std::{num::NonZero, time::Duration};
 
+use governor::Quota;
 use iron_spider::{
     config::Configuration,
     downloader::Downloader,
@@ -144,15 +145,8 @@ async fn main() {
         Some(Configuration {
             download_delay_ms: 1000,
             user_agent: Some("IronSpider/0.1".into()),
+            downloader_request_quota: None,
         }),
-        Downloader::new(
-            Client::builder()
-                .connect_timeout(Duration::from_millis(200))
-                .connector_layer(tower::timeout::TimeoutLayer::new(Duration::from_millis(50)))
-                .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(2))
-                .build()
-                .unwrap(),
-        ),
     );
     engine.start().await;
 }

@@ -1,5 +1,12 @@
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use governor::clock::DefaultClock;
+use governor::state::{InMemoryState, NotKeyed};
+use governor::{Quota, RateLimiter, clock, state};
+use tracing::error;
 
 use crate::request::Request;
 use crate::response::Response;
@@ -8,13 +15,18 @@ use crate::response::Response;
 pub struct Downloader {
     client: reqwest::Client,
     active_requests: Arc<AtomicUsize>,
+    limiter: Option<Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>>,
 }
 
 impl Downloader {
-    pub fn new(client: reqwest::Client) -> Self {
+    pub fn new(client: reqwest::Client, quota: Option<Quota>) -> Self {
         Self {
             client,
             active_requests: Arc::new(AtomicUsize::new(0)),
+            limiter: match quota {
+                Some(q) => Some(Arc::new(RateLimiter::direct(q))),
+                None => None,
+            },
         }
     }
 
@@ -23,6 +35,9 @@ impl Downloader {
     }
 
     pub async fn fetch(&self, request: &Request) -> Response {
+        if let Some(ref limiter) = self.limiter {
+            let _permit = limiter.until_ready().await;
+        }
         self.active_requests.fetch_add(1, Ordering::SeqCst);
 
         let resp = self
@@ -46,7 +61,7 @@ impl Downloader {
                 }
             }
             Err(e) => {
-                // Optionally: log or retry
+                error!("Request failed: {}, {}", request.url, e);
                 Response {
                     status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
                     body: format!("Download error: {}", e),
