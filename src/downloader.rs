@@ -59,7 +59,21 @@ impl Downloader {
                 }
             }
             Err(e) => {
-                error!("Request failed: {}, {}", request.url, e);
+                if e.is_timeout() {
+                    error!("Timeout: {} -> {}", request.url, e);
+                } else if e.is_connect() {
+                    error!(
+                        "Connection error (maybe server not started): {} -> {}",
+                        request.url, e
+                    );
+                } else if e.is_request() {
+                    error!("Bad request formation: {} -> {}", request.url, e);
+                } else if e.is_body() {
+                    error!("Body error: {} -> {}", request.url, e);
+                } else {
+                    error!("Request failed (other): {} -> {:?}", request.url, e);
+                }
+
                 Response {
                     status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
                     body: format!("Download error: {}", e),

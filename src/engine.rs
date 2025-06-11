@@ -31,6 +31,11 @@ impl Engine {
     ) -> Self {
         let config = config.unwrap_or_default();
 
+        let downloader_client = Client::builder()
+            .timeout(config.downloader_request_timeout)
+            .build()
+            .expect("Failed to build downloader's client.");
+
         let downloader_request_quota = config.downloader_request_quota;
 
         Self {
@@ -38,7 +43,7 @@ impl Engine {
             spiders,
             pipelines: Arc::new(pipelines),
             config,
-            downloader: Arc::new(Downloader::new(Client::new(), downloader_request_quota)),
+            downloader: Arc::new(Downloader::new(downloader_client, downloader_request_quota)),
             tasks: JoinSet::new(),
         }
     }

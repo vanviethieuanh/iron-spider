@@ -145,15 +145,6 @@ async fn main() {
     pipeline_manager.add_pipeline::<ArticleItem>(print_article_pipe, 30);
     pipeline_manager.add_pipeline::<ArticleItem>(transform_article_pipe, 10);
 
-    let mut engine = Engine::new(
-        scheduler,
-        spiders,
-        pipeline_manager,
-        Some(Configuration {
-            download_delay_ms: 1000,
-            user_agent: Some("IronSpider/0.1".into()),
-            downloader_request_quota: None,
-        }),
-    );
+    let mut engine = Engine::new(scheduler, spiders, pipeline_manager, None);
     engine.start().await;
 }
