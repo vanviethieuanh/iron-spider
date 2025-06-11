@@ -1,9 +1,11 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use governor::clock::DefaultClock;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::{Quota, RateLimiter};
+use reqwest::StatusCode;
 use tracing::error;
 
 use crate::request::Request;
@@ -14,10 +16,15 @@ pub struct Downloader {
     client: reqwest::Client,
     active_requests: Arc<AtomicUsize>,
     limiter: Option<Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>>,
+    http_error_allow_codes: HashSet<StatusCode>,
 }
 
 impl Downloader {
-    pub fn new(client: reqwest::Client, quota: Option<Quota>) -> Self {
+    pub fn new(
+        client: reqwest::Client,
+        quota: Option<Quota>,
+        http_error_allow_codes: HashSet<StatusCode>,
+    ) -> Self {
         Self {
             client,
             active_requests: Arc::new(AtomicUsize::new(0)),
@@ -25,6 +32,7 @@ impl Downloader {
                 Some(q) => Some(Arc::new(RateLimiter::direct(q))),
                 None => None,
             },
+            http_error_allow_codes,
         }
     }
 
@@ -32,7 +40,7 @@ impl Downloader {
         self.active_requests.load(Ordering::SeqCst) == 0
     }
 
-    pub async fn fetch(&self, request: &Request) -> Response {
+    pub async fn fetch(&self, request: &Request) -> Option<Response> {
         if let Some(ref limiter) = self.limiter {
             let _permit = limiter.until_ready().await;
         }
@@ -51,11 +59,19 @@ impl Downloader {
         match resp {
             Ok(r) => {
                 let status = r.status();
-                let body = r.text().await.unwrap_or_default();
-                Response {
-                    status,
-                    body,
-                    request: request.clone(),
+                let url = r.url().clone();
+
+                if r.error_for_status_ref().is_ok() || self.http_error_allow_codes.contains(&status)
+                {
+                    let body = r.text().await.unwrap_or_default();
+                    Some(Response {
+                        status,
+                        body,
+                        request: request.clone(),
+                    })
+                } else {
+                    error!("Status error [{}]: {}", status, url);
+                    None
                 }
             }
             Err(e) => {
@@ -74,11 +90,7 @@ impl Downloader {
                     error!("Request failed (other): {} -> {:?}", request.url, e);
                 }
 
-                Response {
-                    status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-                    body: format!("Download error: {}", e),
-                    request: request.clone(),
-                }
+                None
             }
         }
     }

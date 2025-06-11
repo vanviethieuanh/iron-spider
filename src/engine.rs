@@ -35,15 +35,19 @@ impl Engine {
             .timeout(config.downloader_request_timeout)
             .build()
             .expect("Failed to build downloader's client.");
-
         let downloader_request_quota = config.downloader_request_quota;
+        let http_error_allow_codes = config.http_error_allow_codes.clone();
 
         Self {
             scheduler,
             spiders,
             pipelines: Arc::new(pipelines),
             config,
-            downloader: Arc::new(Downloader::new(downloader_client, downloader_request_quota)),
+            downloader: Arc::new(Downloader::new(
+                downloader_client,
+                downloader_request_quota,
+                http_error_allow_codes,
+            )),
             tasks: JoinSet::new(),
         }
     }
@@ -66,7 +70,10 @@ impl Engine {
 
         self.tasks.spawn(async move {
             let response = downloader.fetch(&request).await;
-            let result = (request.callback)(response);
+            let result = match response {
+                Some(resp) => (request.callback)(resp),
+                None => SpiderResult::None,
+            };
 
             match result {
                 SpiderResult::Requests(requests) => {
@@ -120,7 +127,6 @@ impl Engine {
                         }
                     }
                 }
-
 
                 Some(result) = self.tasks.join_next() => {
                     match result {

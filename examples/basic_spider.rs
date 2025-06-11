@@ -1,3 +1,5 @@
+use std::{collections::HashSet, time::Duration};
+
 use iron_spider::{
     config::Configuration,
     engine::Engine,
@@ -113,6 +115,7 @@ impl Spider for ExampleSpider {
                 None => SpiderResult::None,
             }
         } else {
+            info!("Empty response");
             SpiderResult::None
         }
     }
@@ -145,6 +148,15 @@ async fn main() {
     pipeline_manager.add_pipeline::<ArticleItem>(print_article_pipe, 30);
     pipeline_manager.add_pipeline::<ArticleItem>(transform_article_pipe, 10);
 
-    let mut engine = Engine::new(scheduler, spiders, pipeline_manager, None);
+    let mut http_error_allow_codes = HashSet::new();
+    http_error_allow_codes.insert(reqwest::StatusCode::NOT_FOUND);
+
+    let config = Some(Configuration {
+        downloader_request_timeout: Duration::from_secs(10),
+        http_error_allow_codes,
+        ..Default::default()
+    });
+
+    let mut engine = Engine::new(scheduler, spiders, pipeline_manager, config);
     engine.start().await;
 }

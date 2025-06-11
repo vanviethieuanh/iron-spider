@@ -1,4 +1,6 @@
-use std::any::Any;
+use std::{any::Any, collections::HashSet};
+
+use reqwest::StatusCode;
 
 use crate::{request::Request, response::Response};
 
@@ -13,8 +15,8 @@ pub enum SpiderResult {
 }
 
 pub trait Spider: Send + Sync {
-    fn start_urls(&self) -> Vec<Request>;
     fn name(&self) -> &str;
+    fn start_urls(&self) -> Vec<Request>;
     fn parse(response: Response) -> SpiderResult
     where
         Self: Sized;
