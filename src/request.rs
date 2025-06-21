@@ -1,11 +1,16 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
+
+use crate::spider::Spider;
+
+use super::{response::Response, spider::SpiderResult};
 
 #[derive(Clone)]
 pub struct Request {
+    pub spider: Arc<dyn Spider>,
+
     pub url: String,
     pub method: reqwest::Method,
     pub headers: Option<reqwest::header::HeaderMap>,
     pub body: Option<String>,
     pub meta: Option<HashMap<String, String>>,
-    pub callback: fn(super::response::Response) -> super::spider::SpiderResult,
 }

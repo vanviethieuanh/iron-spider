@@ -71,7 +71,7 @@ impl Engine {
         self.tasks.spawn(async move {
             let response = downloader.fetch(&request).await;
             let result = match response {
-                Some(resp) => (request.callback)(resp),
+                Some(resp) => request.spider.parse(resp),
                 None => SpiderResult::None,
             };
 

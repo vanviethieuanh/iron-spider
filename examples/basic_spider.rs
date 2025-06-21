@@ -1,4 +1,8 @@
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 
 use iron_spider::{
     config::Configuration,
@@ -7,7 +11,7 @@ use iron_spider::{
     request::Request,
     response::Response,
     scheduler::SimpleScheduler,
-    spider::{Spider, SpiderResult},
+    spider::{self, Spider, SpiderResult},
 };
 use regex::Regex;
 use scraper::{Html, Selector};
@@ -19,7 +23,10 @@ pub struct ArticleItem {
     pub author: String,
 }
 
-pub struct ExampleSpider;
+#[derive(Clone)]
+pub struct ExampleSpider {
+    pub discovered: Arc<RwLock<HashSet<String>>>,
+}
 
 fn extract_number(s: &str) -> Option<u32> {
     let re = Regex::new(r"\d+").ok()?;
@@ -56,35 +63,55 @@ impl ExampleSpider {
             author: author_text,
         })
     }
+
+    pub fn new() -> Self {
+        Self {
+            discovered: Arc::new(RwLock::new(HashSet::new())),
+        }
+    }
+
+    /// Optional: add helper method to insert safely
+    pub fn mark_discovered(&self, url: String) {
+        let mut guard = self.discovered.write().unwrap();
+        guard.insert(url);
+    }
+
+    /// Optional: check existence
+    pub fn is_discovered(&self, url: &str) -> bool {
+        let guard = self.discovered.read().unwrap();
+        guard.contains(url)
+    }
+
+    pub fn discovered_count(&self) -> usize {
+        let guard = self.discovered.read().unwrap();
+        guard.len()
+    }
 }
 
 impl Spider for ExampleSpider {
     fn start_urls(&self) -> Vec<Request> {
         vec![
-            Request {
-                url: "http://localhost:5000/article/4".to_string(),
-                method: reqwest::Method::GET,
-                headers: None,
-                body: None,
-                meta: None,
-                callback: ExampleSpider::parse,
-            },
-            Request {
-                url: "http://localhost:5000/article/5".to_string(),
-                method: reqwest::Method::GET,
-                headers: None,
-                body: None,
-                meta: None,
-                callback: ExampleSpider::parse,
-            },
-            Request {
-                url: "http://localhost:5000/article/3".to_string(),
-                method: reqwest::Method::GET,
-                headers: None,
-                body: None,
-                meta: None,
-                callback: ExampleSpider::parse,
-            },
+            self.request(
+                "http://localhost:5000/article/4".to_string(),
+                reqwest::Method::GET,
+                None,
+                None,
+                None,
+            ),
+            self.request(
+                "http://localhost:5000/article/5".to_string(),
+                reqwest::Method::GET,
+                None,
+                None,
+                None,
+            ),
+            self.request(
+                "http://localhost:5000/article/3".to_string(),
+                reqwest::Method::GET,
+                None,
+                None,
+                None,
+            ),
         ]
     }
 
@@ -92,23 +119,24 @@ impl Spider for ExampleSpider {
         "example_spider"
     }
 
-    fn parse(response: Response) -> SpiderResult {
-        if let Some(item) = Self::parse_article_html(&response.body) {
+    fn parse(&self, response: Response) -> SpiderResult {
+        if let Some(item) = ExampleSpider::parse_article_html(&response.body) {
             match extract_number(item.title.as_str()) {
                 Some(i) => {
                     if i != 1 {
+                        self.mark_discovered(response.request.url);
                         SpiderResult::Both {
-                            requests: vec![Request {
-                                url: format!("http://localhost:5000/article/{}", i - 1),
-                                method: reqwest::Method::GET,
-                                headers: None,
-                                body: None,
-                                meta: None,
-                                callback: ExampleSpider::parse,
-                            }],
+                            requests: vec![self.request(
+                                format!("http://localhost:5000/article/{}", i - 1),
+                                reqwest::Method::GET,
+                                None,
+                                None,
+                                None,
+                            )],
                             items: vec![Box::new(item)],
                         }
                     } else {
+                        self.mark_discovered(response.request.url);
                         SpiderResult::Items(vec![Box::new(item)])
                     }
                 }
@@ -128,7 +156,8 @@ async fn main() {
         .init();
 
     let scheduler = Box::new(SimpleScheduler::new());
-    let spiders: Vec<Box<dyn Spider>> = vec![Box::new(ExampleSpider)];
+    let example_spider = Arc::new(ExampleSpider::new());
+    let spiders: Vec<Box<dyn Spider>> = vec![Box::new((*example_spider).clone())];
 
     let print_article_pipe = Pipeline::new(|item: Option<ArticleItem>| {
         info!("Article item pipeline: {:?}", item);
@@ -159,4 +188,9 @@ async fn main() {
 
     let mut engine = Engine::new(scheduler, spiders, pipeline_manager, config);
     engine.start().await;
+
+    info!(
+        "Discovered: {} url(s)",
+        example_spider.discovered_count().to_string().as_str()
+    );
 }

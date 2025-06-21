@@ -1,6 +1,7 @@
-use std::{any::Any, collections::HashSet};
+use std::{any::Any, collections::HashMap, sync::Arc};
 
-use reqwest::StatusCode;
+use reqwest::{Method, header::HeaderMap};
+use tracing::debug;
 
 use crate::{request::Request, response::Response};
 
@@ -17,7 +18,30 @@ pub enum SpiderResult {
 pub trait Spider: Send + Sync {
     fn name(&self) -> &str;
     fn start_urls(&self) -> Vec<Request>;
-    fn parse(response: Response) -> SpiderResult
+    fn parse(&self, response: Response) -> SpiderResult;
+
+    fn close(&self) {
+        debug!("Closing spider: {}", self.name());
+    }
+
+    fn request(
+        &self,
+        url: String,
+        method: Method,
+        headers: Option<HeaderMap>,
+        body: Option<String>,
+        meta: Option<HashMap<String, String>>,
+    ) -> Request
     where
-        Self: Sized;
+        Self: Sized + Clone + 'static,
+    {
+        Request {
+            spider: Arc::new(self.clone()) as Arc<dyn Spider>,
+            url: url,
+            method,
+            headers,
+            body,
+            meta,
+        }
+    }
 }
