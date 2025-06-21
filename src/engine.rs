@@ -31,13 +31,20 @@ impl Engine {
     ) -> Self {
         let config = config.unwrap_or_default();
 
-        let downloader_client = Client::builder()
+        let mut client_builder = Client::builder()
             .timeout(config.downloader_request_timeout)
             .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(
                 config.concurrent_limit,
-            ))
+            ));
+
+        if let Some(ref user_agent) = config.user_agent {
+            client_builder = client_builder.user_agent(user_agent);
+        }
+
+        let downloader_client = client_builder
             .build()
             .expect("Failed to build downloader's client.");
+
         let downloader_request_quota = config.downloader_request_quota;
         let http_error_allow_codes = config.http_error_allow_codes.clone();
 
