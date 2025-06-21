@@ -11,7 +11,7 @@ use iron_spider::{
     request::Request,
     response::Response,
     scheduler::SimpleScheduler,
-    spider::{self, Spider, SpiderResult},
+    spider::{Spider, SpiderResult},
 };
 use regex::Regex;
 use scraper::{Html, Selector};

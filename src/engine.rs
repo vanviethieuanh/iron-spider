@@ -103,6 +103,13 @@ impl Engine {
         });
     }
 
+    pub fn stop(&self) {
+        info!("Stopping engine!");
+        for spider in &self.spiders {
+            spider.close();
+        }
+    }
+
     pub fn completed(&self) -> bool {
         self.tasks.is_empty() && self.downloader.is_idle() && self.scheduler.is_empty()
     }
@@ -122,6 +129,7 @@ impl Engine {
                         None => {
                             if self.completed() {
                                 info!("No more tasks, downloader idle, and scheduler empty — exiting loop");
+                                self.stop();
                                 break;
                             }
                         }
@@ -140,6 +148,7 @@ impl Engine {
 
                     if self.completed() {
                         info!("No more tasks, downloader idle, and scheduler empty — exiting loop");
+                        self.stop();
                         break;
                     }
                 }

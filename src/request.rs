@@ -2,8 +2,6 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::spider::Spider;
 
-use super::{response::Response, spider::SpiderResult};
-
 #[derive(Clone)]
 pub struct Request {
     pub spider: Arc<dyn Spider>,
