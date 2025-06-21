@@ -33,6 +33,9 @@ impl Engine {
 
         let downloader_client = Client::builder()
             .timeout(config.downloader_request_timeout)
+            .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(
+                config.concurrent_limit,
+            ))
             .build()
             .expect("Failed to build downloader's client.");
         let downloader_request_quota = config.downloader_request_quota;

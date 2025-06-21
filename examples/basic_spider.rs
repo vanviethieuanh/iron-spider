@@ -90,29 +90,17 @@ impl ExampleSpider {
 
 impl Spider for ExampleSpider {
     fn start_urls(&self) -> Vec<Request> {
-        vec![
-            self.request(
-                "http://localhost:5000/article/4".to_string(),
-                reqwest::Method::GET,
-                None,
-                None,
-                None,
-            ),
-            self.request(
-                "http://localhost:5000/article/5".to_string(),
-                reqwest::Method::GET,
-                None,
-                None,
-                None,
-            ),
-            self.request(
-                "http://localhost:5000/article/3".to_string(),
-                reqwest::Method::GET,
-                None,
-                None,
-                None,
-            ),
-        ]
+        (1..=1000)
+            .map(|i| {
+                self.request(
+                    format!("http://localhost:5000/article/{}", 3),
+                    reqwest::Method::GET,
+                    None,
+                    None,
+                    None,
+                )
+            })
+            .collect()
     }
 
     fn name(&self) -> &str {

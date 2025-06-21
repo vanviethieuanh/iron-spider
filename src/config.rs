@@ -12,6 +12,7 @@ pub struct Configuration {
     pub user_agent: Option<String>,
 
     pub http_error_allow_codes: HashSet<StatusCode>,
+    pub concurrent_limit: usize,
 }
 
 impl Default for Configuration {
@@ -24,6 +25,7 @@ impl Default for Configuration {
             downloader_request_quota: None,
             user_agent: Some("IronSpider/0.0.1".to_string()),
             http_error_allow_codes: allowed,
+            concurrent_limit: 32,
         }
     }
 }
