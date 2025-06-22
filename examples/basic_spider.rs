@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use iron_spider::{
     config::Configuration,
     engine::Engine,
-    pipeline::{Pipeline, PipelineManager},
+    pipeline::{FnPipeline, Pipeline, PipelineManager},
     request::Request,
     response::Response,
     scheduler::SimpleScheduler,
@@ -155,18 +155,17 @@ async fn main() {
     let example_spider = Arc::new(ExampleSpider::new());
     let spiders: Vec<Box<dyn Spider>> = vec![Box::new((*example_spider).clone())];
 
-    let print_article_pipe = Pipeline::new(|item: Option<ArticleItem>| {
+    let print_article_pipe = FnPipeline::new(|item: Option<ArticleItem>| {
         info!("Article item pipeline: {:?}", item);
         item
     });
-    let transform_article_pipe = Pipeline::new(|item: Option<ArticleItem>| {
+
+    let transform_article_pipe = FnPipeline::new(|item: Option<ArticleItem>| {
         info!("Transforming item: {:?}", item);
-        let transformed = item.map(|mut i| {
+        item.map(|mut i| {
             i.author = "Transformed author".to_string();
             i
-        });
-
-        transformed
+        })
     });
 
     let mut pipeline_manager = PipelineManager::new();
