@@ -1,5 +1,6 @@
 use std::{any::Any, collections::HashMap, sync::Arc};
 
+use async_trait::async_trait;
 use reqwest::{Method, Url, header::HeaderMap};
 use tracing::debug;
 
@@ -15,10 +16,12 @@ pub enum SpiderResult {
     None,
 }
 
+#[async_trait]
 pub trait Spider: Send + Sync {
     fn name(&self) -> &str;
     fn start_urls(&self) -> Vec<Request>;
-    fn parse(&self, response: Response) -> SpiderResult;
+
+    async fn parse(&self, response: Response) -> SpiderResult;
 
     fn close(&self) {
         debug!("Closing spider: {}", self.name());

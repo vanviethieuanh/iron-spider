@@ -4,6 +4,7 @@ use std::{
     time::Duration,
 };
 
+use async_trait::async_trait;
 use iron_spider::{
     config::Configuration,
     engine::Engine,
@@ -89,6 +90,7 @@ impl ExampleSpider {
     }
 }
 
+#[async_trait]
 impl Spider for ExampleSpider {
     fn start_urls(&self) -> Vec<Request> {
         (1..=1000)
@@ -105,7 +107,7 @@ impl Spider for ExampleSpider {
         "example_spider"
     }
 
-    fn parse(&self, response: Response) -> SpiderResult {
+    async fn parse(&self, response: Response) -> SpiderResult {
         if let Some(item) = ExampleSpider::parse_article_html(&response.body) {
             match extract_number(item.title.as_str()) {
                 Some(i) => {
