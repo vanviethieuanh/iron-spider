@@ -8,7 +8,7 @@ use crate::{
     config::Configuration,
     downloader::Downloader,
     pipeline::PipelineManager,
-    request::Request,
+    request::{self, Request},
     scheduler::Scheduler,
     spider::{Spider, SpiderResult},
 };

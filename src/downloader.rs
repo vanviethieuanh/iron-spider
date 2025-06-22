@@ -48,7 +48,7 @@ impl Downloader {
 
         let resp = self
             .client
-            .request(request.method.clone(), &request.url)
+            .request(request.method.clone(), request.url.clone())
             .headers(request.headers.clone().unwrap_or_default())
             .body(request.body.clone().unwrap_or_default())
             .send()

@@ -14,6 +14,7 @@ use iron_spider::{
     spider::{Spider, SpiderResult},
 };
 use regex::Regex;
+use reqwest::Url;
 use scraper::{Html, Selector};
 use tracing::{Level, info};
 
@@ -92,13 +93,10 @@ impl Spider for ExampleSpider {
     fn start_urls(&self) -> Vec<Request> {
         (1..=1000)
             .map(|i| {
-                self.request(
-                    format!("http://localhost:5000/article/{}", 3),
-                    reqwest::Method::GET,
-                    None,
-                    None,
-                    None,
-                )
+                let url = format!("http://localhost:5000/article/{}", 3)
+                    .parse::<Url>()
+                    .expect("Invalid URL");
+                self.request(url, reqwest::Method::GET, None, None, None)
             })
             .collect()
     }
@@ -112,10 +110,18 @@ impl Spider for ExampleSpider {
             match extract_number(item.title.as_str()) {
                 Some(i) => {
                     if i != 1 {
-                        self.mark_discovered(response.request.url);
+                        self.mark_discovered(response.request.url.to_string());
+
+                        let next_url_str = format!("./article/{}", i - 1);
+                        let next_url = response
+                            .request
+                            .url
+                            .join(&next_url_str)
+                            .expect("Invalid next URL");
+
                         SpiderResult::Both {
                             requests: vec![self.request(
-                                format!("http://localhost:5000/article/{}", i - 1),
+                                next_url,
                                 reqwest::Method::GET,
                                 None,
                                 None,
@@ -124,7 +130,7 @@ impl Spider for ExampleSpider {
                             items: vec![Box::new(item)],
                         }
                     } else {
-                        self.mark_discovered(response.request.url);
+                        self.mark_discovered(response.request.url.to_string());
                         SpiderResult::Items(vec![Box::new(item)])
                     }
                 }

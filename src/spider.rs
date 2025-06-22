@@ -1,6 +1,6 @@
 use std::{any::Any, collections::HashMap, sync::Arc};
 
-use reqwest::{Method, header::HeaderMap};
+use reqwest::{Method, Url, header::HeaderMap};
 use tracing::debug;
 
 use crate::{request::Request, response::Response};
@@ -26,7 +26,7 @@ pub trait Spider: Send + Sync {
 
     fn request(
         &self,
-        url: String,
+        url: Url,
         method: Method,
         headers: Option<HeaderMap>,
         body: Option<String>,
