@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use reqwest::Client;
-use tokio::task::JoinSet;
+use tokio::{signal, task::JoinSet};
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -161,6 +161,12 @@ impl Engine {
                         self.stop();
                         break;
                     }
+                }
+
+                _ = signal::ctrl_c() => {
+                    info!("Ctrl+C pressed — stopping engine");
+                    self.stop();
+                    break;
                 }
             }
         }

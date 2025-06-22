@@ -23,7 +23,7 @@ pub trait Spider: Send + Sync {
 
     async fn parse(&self, response: Response) -> SpiderResult;
 
-    fn close(&self) {
+    async fn close(&self) {
         debug!("Closing spider: {}", self.name());
     }
 
