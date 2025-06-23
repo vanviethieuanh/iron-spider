@@ -119,8 +119,12 @@ impl Engine {
     pub async fn stop(&self) {
         info!("Stopping engine!");
 
+        // Call all spider close
         let tasks = self.spiders.iter().map(|spider| spider.close());
         join_all(tasks).await;
+
+        // Call all pipeline close
+        self.pipelines.lock().await.close_all();
     }
 
     pub fn completed(&self) -> bool {

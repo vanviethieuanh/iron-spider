@@ -9,6 +9,7 @@ use tracing::warn;
 pub trait Pipeline: Send + Sync {
     fn type_id(&self) -> TypeId;
     fn try_process(&mut self, item: Option<Box<dyn Any + Send>>) -> Option<Box<dyn Any + Send>>;
+    fn close(&mut self);
 }
 
 pub struct FnPipeline<T>
@@ -42,6 +43,8 @@ where
         let result = (self.handler)(typed);
         result.map(|r| Box::new(r) as Box<dyn Any + Send>)
     }
+
+    fn close(&mut self) {}
 }
 
 struct PrioritizedPipeline {
@@ -94,6 +97,15 @@ impl PipelineManager {
             }
         } else {
             warn!("No pipeline for type {:?}", type_id);
+        }
+    }
+
+    pub fn close_all(&self) {
+        for (_, pipeline_group) in &self.pipelines {
+            let mut pipelines = pipeline_group.lock().unwrap();
+            for pp in pipelines.iter_mut() {
+                pp.pipeline.close();
+            }
         }
     }
 }
