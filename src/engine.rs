@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use reqwest::Client;
-use tokio::{signal, task::JoinSet};
+use tokio::{signal, sync::Mutex, task::JoinSet};
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
 pub struct Engine {
     scheduler: Box<dyn Scheduler + Send + Sync>,
     spiders: Vec<Box<dyn Spider>>,
-    pipelines: Arc<PipelineManager>,
+    pipelines: Arc<Mutex<PipelineManager>>,
     config: Configuration,
     downloader: Arc<Downloader>,
     tasks: JoinSet<()>,
@@ -51,7 +51,7 @@ impl Engine {
         Self {
             scheduler,
             spiders,
-            pipelines: Arc::new(pipelines),
+            pipelines: Arc::new(Mutex::new(pipelines)),
             config,
             downloader: Arc::new(Downloader::new(
                 downloader_client,
@@ -94,6 +94,7 @@ impl Engine {
                     }
                 }
                 SpiderResult::Items(items) => {
+                    let mut pipelines = pipelines.lock().await;
                     for item in items {
                         pipelines.process_item(item);
                     }
@@ -104,6 +105,7 @@ impl Engine {
                             warn!("Failed to enqueue request");
                         }
                     }
+                    let mut pipelines = pipelines.lock().await;
                     for item in items {
                         pipelines.process_item(item);
                     }

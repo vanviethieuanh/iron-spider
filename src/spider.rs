@@ -8,10 +8,10 @@ use crate::{request::Request, response::Response};
 
 pub enum SpiderResult {
     Requests(Vec<Request>),
-    Items(Vec<Box<dyn Any>>),
+    Items(Vec<Box<dyn Any + Send>>),
     Both {
         requests: Vec<Request>,
-        items: Vec<Box<dyn Any>>,
+        items: Vec<Box<dyn Any + Send>>,
     },
     None,
 }
