@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use futures::future::join_all;
 use reqwest::Client;
 use tokio::{signal, sync::Mutex, task::JoinSet};
 use tracing::{debug, error, info, warn};
@@ -8,7 +9,7 @@ use crate::{
     config::Configuration,
     downloader::Downloader,
     pipeline::PipelineManager,
-    request::{self, Request},
+    request::Request,
     scheduler::Scheduler,
     spider::{Spider, SpiderResult},
 };
@@ -94,7 +95,7 @@ impl Engine {
                     }
                 }
                 SpiderResult::Items(items) => {
-                    let mut pipelines = pipelines.lock().await;
+                    let pipelines = pipelines.lock().await;
                     for item in items {
                         pipelines.process_item(item);
                     }
@@ -105,7 +106,7 @@ impl Engine {
                             warn!("Failed to enqueue request");
                         }
                     }
-                    let mut pipelines = pipelines.lock().await;
+                    let pipelines = pipelines.lock().await;
                     for item in items {
                         pipelines.process_item(item);
                     }
@@ -115,11 +116,11 @@ impl Engine {
         });
     }
 
-    pub fn stop(&self) {
+    pub async fn stop(&self) {
         info!("Stopping engine!");
-        for spider in &self.spiders {
-            spider.close();
-        }
+
+        let tasks = self.spiders.iter().map(|spider| spider.close());
+        join_all(tasks).await;
     }
 
     pub fn completed(&self) -> bool {
@@ -141,7 +142,7 @@ impl Engine {
                         None => {
                             if self.completed() {
                                 info!("No more tasks, downloader idle, and scheduler empty — exiting loop");
-                                self.stop();
+                                self.stop().await;
                                 break;
                             }
                         }
@@ -160,14 +161,14 @@ impl Engine {
 
                     if self.completed() {
                         info!("No more tasks, downloader idle, and scheduler empty — exiting loop");
-                        self.stop();
+                        self.stop().await;
                         break;
                     }
                 }
 
                 _ = signal::ctrl_c() => {
                     info!("Ctrl+C pressed — stopping engine");
-                    self.stop();
+                    self.stop().await;
                     break;
                 }
             }
