@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 async-trait = "0.1.88"
+crossbeam = "0.8.4"
 futures = "0.3.31"
 governor = { version = "0.10.0", features = ["no_std"] }
 regex = "1.11.1"

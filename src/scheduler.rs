@@ -1,46 +1,67 @@
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-
 use crate::request::Request;
+use crossbeam::channel::{Receiver, Sender, TryRecvError, unbounded};
 
-#[async_trait::async_trait]
+// Remove async_trait since these are synchronous operations
 pub trait Scheduler: Send + Sync {
-    async fn dequeue(&mut self) -> Option<Request>;
+    fn dequeue(&mut self) -> Option<Request>;
     fn is_empty(&self) -> bool;
-    fn sender(&self) -> UnboundedSender<Request>;
-    fn close_init_sender(&mut self);
-}
+    fn enqueue(&mut self, request: Request) -> Result<(), SchedulerError>;
 
-// NOTE: Simple Scheduler
-pub struct SimpleScheduler {
-    sender: Option<UnboundedSender<Request>>,
-    receiver: UnboundedReceiver<Request>,
-}
-
-impl SimpleScheduler {
-    pub fn new() -> Self {
-        let (sender, receiver) = unbounded_channel();
-        Self {
-            sender: Some(sender),
-            receiver,
+    // Optional: non-blocking dequeue for better performance
+    fn try_dequeue(&mut self) -> Result<Request, TryRecvError> {
+        match self.dequeue() {
+            Some(req) => Ok(req),
+            None => Err(TryRecvError::Empty),
         }
     }
 }
 
-#[async_trait::async_trait]
+#[derive(Debug)]
+pub enum SchedulerError {
+    ChannelClosed,
+    QueueFull,
+}
+
+// Simple Scheduler - acts as a FIFO queue
+pub struct SimpleScheduler {
+    sender: Sender<Request>,
+    receiver: Receiver<Request>,
+}
+
+impl SimpleScheduler {
+    pub fn new() -> Self {
+        let (sender, receiver) = unbounded();
+        Self { sender, receiver }
+    }
+
+    // Helper method to get a sender handle for external use
+    pub fn get_sender(&self) -> Sender<Request> {
+        self.sender.clone()
+    }
+}
+
+impl Default for SimpleScheduler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Scheduler for SimpleScheduler {
-    async fn dequeue(&mut self) -> Option<Request> {
-        self.receiver.recv().await
+    fn dequeue(&mut self) -> Option<Request> {
+        match self.receiver.try_recv() {
+            Ok(request) => Some(request),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => None,
+        }
     }
-    fn sender(&self) -> UnboundedSender<Request> {
-        self.sender
-            .as_ref()
-            .expect("Sender has already been taken/dropped")
-            .clone()
-    }
+
     fn is_empty(&self) -> bool {
         self.receiver.is_empty()
     }
-    fn close_init_sender(&mut self) {
-        self.sender.take();
+
+    fn enqueue(&mut self, request: Request) -> Result<(), SchedulerError> {
+        self.sender
+            .send(request)
+            .map_err(|_| SchedulerError::ChannelClosed)
     }
 }

@@ -6,6 +6,8 @@ use std::{
 
 use tracing::warn;
 
+use crate::spider::ResultItem;
+
 pub trait Pipeline: Send + Sync {
     fn type_id(&self) -> TypeId;
     fn try_process(&mut self, item: Option<Box<dyn Any + Send>>) -> Option<Box<dyn Any + Send>>;
@@ -52,8 +54,9 @@ struct PrioritizedPipeline {
     pub pipeline: Box<dyn Pipeline>,
 }
 
+#[derive(Clone)]
 pub struct PipelineManager {
-    pipelines: HashMap<TypeId, Mutex<Vec<PrioritizedPipeline>>>,
+    pipelines: HashMap<TypeId, Vec<PrioritizedPipeline>>,
 }
 
 impl PipelineManager {
@@ -86,7 +89,7 @@ impl PipelineManager {
         }
     }
 
-    pub fn process_item(&self, item: Box<dyn Any + Send>) {
+    pub fn process_item(&self, item: ResultItem) {
         let type_id = item.as_ref().type_id();
         let mut current = Some(item);
 

@@ -6,12 +6,14 @@ use tracing::debug;
 
 use crate::{request::Request, response::Response};
 
+pub type ResultItem = Vec<Box<dyn Any>>;
+
 pub enum SpiderResult {
     Requests(Vec<Request>),
-    Items(Vec<Box<dyn Any + Send>>),
+    Items(Vec<ResultItem>),
     Both {
         requests: Vec<Request>,
-        items: Vec<Box<dyn Any + Send>>,
+        items: Vec<ResultItem>,
     },
     None,
 }
