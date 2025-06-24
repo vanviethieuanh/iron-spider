@@ -88,6 +88,7 @@ impl Engine {
 
             match result {
                 SpiderResult::Requests(requests) => {
+                    debug!("Parsed {} new requests", requests.len());
                     for req in requests {
                         if sender.send(req).is_err() {
                             warn!("Failed to enqueue request");
@@ -95,12 +96,18 @@ impl Engine {
                     }
                 }
                 SpiderResult::Items(items) => {
+                    debug!("Parsed {} new items", items.len());
                     let pipelines = pipelines.lock().await;
                     for item in items {
                         pipelines.process_item(item);
                     }
                 }
                 SpiderResult::Both { requests, items } => {
+                    debug!(
+                        "Parsed {} requests and {} items",
+                        requests.len(),
+                        items.len()
+                    );
                     for req in requests {
                         if sender.send(req).is_err() {
                             warn!("Failed to enqueue request");
@@ -111,7 +118,9 @@ impl Engine {
                         pipelines.process_item(item);
                     }
                 }
-                SpiderResult::None => {}
+                SpiderResult::None => {
+                    debug!("Parse returned nothing");
+                }
             }
         });
     }

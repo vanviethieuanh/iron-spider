@@ -93,7 +93,7 @@ impl ExampleSpider {
 #[async_trait]
 impl Spider for ExampleSpider {
     fn start_urls(&self) -> Vec<Request> {
-        (1..=1000)
+        (1..50000)
             .map(|i| {
                 let url = format!("http://localhost:5000/article/{}", 3)
                     .parse::<Url>()
@@ -178,6 +178,7 @@ async fn main() {
     let config = Some(Configuration {
         downloader_request_timeout: Duration::from_secs(10),
         http_error_allow_codes,
+        concurrent_limit: 10000,
         ..Default::default()
     });
 
