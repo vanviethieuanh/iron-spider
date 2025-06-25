@@ -5,9 +5,10 @@ edition = "2024"
 
 [dependencies]
 async-trait = "0.1.88"
-crossbeam = "0.8.4"
+crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
 futures = "0.3.31"
 governor = { version = "0.10.0", features = ["no_std"] }
+rayon = "1.10.0"
 regex = "1.11.1"
 reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate", "cookies", "blocking"] }
 scraper = "0.23.1"

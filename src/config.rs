@@ -4,7 +4,7 @@ use governor::Quota;
 use reqwest::StatusCode;
 
 #[derive(Clone)]
-pub struct Configuration {
+pub struct EngineConfig {
     pub downloader_request_timeout: Duration,
     pub downloader_delay: Duration,
     pub downloader_request_quota: Option<Quota>,
@@ -14,16 +14,15 @@ pub struct Configuration {
     pub http_error_allow_codes: HashSet<StatusCode>,
     pub concurrent_limit: usize,
 
-    pub(crate) pipeline_worker_threads: i32,
-    pub(crate) downloader_threads: i32,
-    pub(crate) shutdown_timeout: Duration,
-    pub(crate) stats_interval: Duration,
+    pub pipeline_worker_threads: usize,
+    pub downloader_threads: i32,
+    pub stats_interval: Duration,
 
     // Shutdown when: no active requests AND scheduler is empty AND idle timeout
-    pub(crate) idle_timeout: Duration,
+    pub idle_timeout: Duration,
 }
 
-impl Default for Configuration {
+impl Default for EngineConfig {
     fn default() -> Self {
         let allowed = HashSet::new();
 
@@ -37,7 +36,6 @@ impl Default for Configuration {
 
             pipeline_worker_threads: 4,
             downloader_threads: 1,
-            shutdown_timeout: Duration::from_secs(1),
             stats_interval: Duration::from_secs(1),
             idle_timeout: Duration::from_secs(1),
         }

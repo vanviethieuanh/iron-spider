@@ -112,18 +112,6 @@ impl From<reqwest::Error> for EngineError {
     }
 }
 
-impl From<serde_json::Error> for EngineError {
-    fn from(err: serde_json::Error) -> Self {
-        EngineError::SerializationError(err.to_string())
-    }
-}
-
-impl<T> From<crossbeam_channel::SendError<T>> for EngineError {
-    fn from(_: crossbeam_channel::SendError<T>) -> Self {
-        EngineError::ChannelError("Failed to send message through channel".to_string())
-    }
-}
-
 // Helper methods for creating specific errors
 impl EngineError {
     pub fn spider_error<S: Into<String>>(spider_name: S, error: S) -> Self {

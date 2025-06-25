@@ -6,7 +6,7 @@ use std::{
 
 use async_trait::async_trait;
 use iron_spider::{
-    config::Configuration,
+    config::EngineConfig,
     engine::Engine,
     pipeline::{FnPipeline, Pipeline, PipelineManager},
     request::Request,
@@ -92,10 +92,10 @@ impl ExampleSpider {
 
 #[async_trait]
 impl Spider for ExampleSpider {
-    fn start_urls(&self) -> Vec<Request> {
+    fn start_requests(&self) -> Vec<Request> {
         (1..50000)
-            .map(|i| {
-                let url = format!("http://localhost:5000/article/{}", 3)
+            .map(|_| {
+                let url = format!("http://127.0.0.1:5000/article/{}", 3)
                     .parse::<Url>()
                     .expect("Invalid URL");
                 self.request(url, reqwest::Method::GET, None, None, None)
@@ -107,7 +107,7 @@ impl Spider for ExampleSpider {
         "example_spider"
     }
 
-    async fn parse(&self, response: Response) -> SpiderResult {
+    fn parse(&self, response: Response) -> SpiderResult {
         if let Some(item) = ExampleSpider::parse_article_html(&response.body) {
             match extract_number(item.title.as_str()) {
                 Some(i) => {
@@ -145,11 +145,20 @@ impl Spider for ExampleSpider {
     }
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO) // Or "debug" for more verbose logs
         .init();
+
+    let mut http_error_allow_codes = HashSet::new();
+    http_error_allow_codes.insert(reqwest::StatusCode::NOT_FOUND);
+
+    let config = EngineConfig {
+        downloader_request_timeout: Duration::from_secs(10),
+        http_error_allow_codes,
+        concurrent_limit: 10000,
+        ..Default::default()
+    };
 
     let scheduler = Box::new(SimpleScheduler::new());
     let example_spider = Arc::new(ExampleSpider::new());
@@ -168,22 +177,12 @@ async fn main() {
         })
     });
 
-    let mut pipeline_manager = PipelineManager::new();
+    let mut pipeline_manager = PipelineManager::new(&config);
     pipeline_manager.add_pipeline::<ArticleItem>(print_article_pipe, 30);
     pipeline_manager.add_pipeline::<ArticleItem>(transform_article_pipe, 10);
 
-    let mut http_error_allow_codes = HashSet::new();
-    http_error_allow_codes.insert(reqwest::StatusCode::NOT_FOUND);
-
-    let config = Some(Configuration {
-        downloader_request_timeout: Duration::from_secs(10),
-        http_error_allow_codes,
-        concurrent_limit: 10000,
-        ..Default::default()
-    });
-
-    let mut engine = Engine::new(scheduler, spiders, pipeline_manager, config);
-    engine.start().await;
+    let mut engine = Engine::new(scheduler, spiders, pipeline_manager, Some(config));
+    let _ = engine.start();
 
     info!(
         "Discovered: {} url(s)",

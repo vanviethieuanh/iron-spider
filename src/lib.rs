@@ -1,6 +1,7 @@
 pub mod config;
 pub mod downloader;
 pub mod engine;
+pub mod errors;
 pub mod item;
 pub mod pipeline;
 pub mod request;

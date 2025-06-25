@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::{request::Request, response::Response};
 
-pub type ResultItem = Vec<Box<dyn Any>>;
+pub type ResultItem = Box<dyn Any + Send + Sync>;
 
 pub enum SpiderResult {
     Requests(Vec<Request>),
@@ -21,14 +21,11 @@ pub enum SpiderResult {
 #[async_trait]
 pub trait Spider: Send + Sync {
     fn name(&self) -> &str;
-    fn start_urls(&self) -> Vec<Request>;
-
-    async fn parse(&self, response: Response) -> SpiderResult;
-
-    async fn close(&self) {
+    fn start_requests(&self) -> Vec<Request>;
+    fn parse(&self, response: Response) -> SpiderResult;
+    fn close(&self) {
         debug!("Closing spider: {}", self.name());
     }
-
     fn request(
         &self,
         url: Url,
