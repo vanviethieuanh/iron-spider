@@ -156,7 +156,7 @@ fn main() {
     let config = EngineConfig {
         downloader_request_timeout: Duration::from_secs(10),
         http_error_allow_codes,
-        concurrent_limit: 10000,
+        concurrent_limit: 32,
         ..Default::default()
     };
 

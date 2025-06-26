@@ -33,13 +33,10 @@ pub struct Engine {
     pipeline_manager: Arc<PipelineManager>,
     config: EngineConfig,
     downloader: Arc<Downloader>,
-    tasks: JoinSet<()>,
 
     active_requests: Arc<AtomicUsize>,
     shutdown_signal: Arc<AtomicBool>,
     last_activity: Arc<std::sync::Mutex<Instant>>,
-    limiter: Option<Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>>,
-    max_concurrent_download: Arc<Semaphore>,
 }
 
 impl Engine {
@@ -51,46 +48,23 @@ impl Engine {
     ) -> Self {
         let config = config.unwrap_or_default();
 
-        let mut client_builder = Client::builder()
-            .timeout(config.downloader_request_timeout)
-            .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(
-                config.concurrent_limit,
-            ));
-
-        if let Some(ref user_agent) = config.user_agent {
-            client_builder = client_builder.user_agent(user_agent);
-        }
-
-        let downloader_client = client_builder
-            .build()
-            .expect("Failed to build downloader's client.");
-
-        let downloader_request_quota = config.downloader_request_quota;
-        let http_error_allow_codes = config.http_error_allow_codes.clone();
-
-        let downloader_limiter = match config.downloader_request_quota {
-            Some(q) => Some(Arc::new(RateLimiter::direct(q))),
-            None => None,
+        let downloader = match Downloader::new(&config) {
+            Ok(d) => Arc::new(d),
+            Err(e) => {
+                error!("Downloader initialization failed: {}", e);
+                panic!();
+            }
         };
-
-        let concurrent_limit = config.concurrent_limit.clone();
 
         Self {
             scheduler: Arc::new(Mutex::new(scheduler)),
             spiders,
             pipeline_manager: Arc::new(pipelines),
             config,
-            downloader: Arc::new(Downloader::new(
-                downloader_client,
-                downloader_request_quota,
-                http_error_allow_codes,
-            )),
-            tasks: JoinSet::new(),
+            downloader,
             active_requests: Arc::new(AtomicUsize::new(0)),
             shutdown_signal: Arc::new(AtomicBool::new(false)),
             last_activity: Arc::new(std::sync::Mutex::new(Instant::now())),
-            limiter: downloader_limiter,
-            max_concurrent_download: Arc::new(Semaphore::new(concurrent_limit)),
         }
     }
 
@@ -109,40 +83,34 @@ impl Engine {
         let shutdown_signal = Arc::clone(&self.shutdown_signal);
         let last_activity = Arc::clone(&self.last_activity);
 
-        let config = self.config.clone();
-
         // Use crossbeam::scope for structured concurrency
         crossbeam::scope(|scope| {
             // 0. Seed initial requests
             self.seed_initial_requests_to_scheduler()?;
 
-            // 1. Spawn Downloader Threads
+            // 1. Spawn Downloader Thread
             // Downloader pulls requests directly from scheduler
-            let _downloader_handles: Vec<_> = (0..config.downloader_threads)
-                .map(|i| {
-                    let scheduler = Arc::clone(&self.scheduler);
-                    let resp_sender = resp_sender.clone();
-                    let active_requests = Arc::clone(&active_requests);
-                    let shutdown_signal = Arc::clone(&shutdown_signal);
-                    let last_activity = Arc::clone(&last_activity);
-                    let concurrent_limit = Arc::clone(&self.max_concurrent_download);
-                    let config = config.clone();
+            let _downloader_handles = {
+                let downloader = self.downloader.clone();
 
-                    scope.spawn(move |_| {
-                        println!("⬇️  Downloader thread {} started", i);
-                        Self::run_downloader(
-                            i as usize,
-                            scheduler,
-                            resp_sender,
-                            active_requests,
-                            shutdown_signal,
-                            last_activity,
-                            &config,
-                            concurrent_limit,
-                        )
-                    })
+                let scheduler = Arc::clone(&self.scheduler);
+                let resp_sender = resp_sender.clone();
+                let active_requests = Arc::clone(&active_requests);
+                let shutdown_signal = Arc::clone(&shutdown_signal);
+                let last_activity = Arc::clone(&last_activity);
+                let config = self.config.clone();
+
+                scope.spawn(move |_| {
+                    downloader.start(
+                        scheduler,
+                        resp_sender,
+                        active_requests,
+                        shutdown_signal,
+                        last_activity,
+                        &config,
+                    )
                 })
-                .collect();
+            };
 
             // 2. Spawn Spider Manager Thread
             // Spider Manager pushes requests to scheduler
@@ -217,68 +185,6 @@ impl Engine {
             Ok(())
         })
         .unwrap()
-    }
-
-    fn run_downloader(
-        thread_id: usize,
-        scheduler: Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
-        resp_sender: Sender<Response>,
-        active_requests: Arc<AtomicUsize>,
-        shutdown_signal: Arc<AtomicBool>,
-        last_activity: Arc<std::sync::Mutex<Instant>>,
-        config: &EngineConfig,
-        download_sem: Arc<Semaphore>,
-    ) {
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-
-        rt.block_on(async {
-            let client = reqwest::Client::builder()
-                .timeout(config.downloader_request_timeout)
-                .connect_timeout(Duration::from_millis(200))
-                .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(2))
-                .build()
-                .unwrap();
-
-            let mut join_set = tokio::task::JoinSet::new();
-
-            while !shutdown_signal.load(Ordering::Relaxed) {
-                // Pull request from scheduler
-                let request = {
-                    let mut sched = scheduler.lock().unwrap();
-                    sched.dequeue()
-                };
-
-                match request {
-                    Some(req) => {
-                        active_requests.fetch_add(1, Ordering::Relaxed);
-                        *last_activity.lock().unwrap() = Instant::now();
-
-                        let client = client.clone();
-                        let resp_sender = resp_sender.clone();
-                        let config = config.clone();
-                        let active_requests = Arc::clone(&active_requests);
-                        let download_sem_clone = download_sem.clone();
-
-                        // Perform HTTP request
-                        join_set.spawn(async move {
-                            if let Some(response) =
-                                Self::perform_request(&config, &client, req, download_sem_clone)
-                                    .await
-                            {
-                                let _ = resp_sender.send(response);
-                            }
-                            active_requests.fetch_sub(1, Ordering::Relaxed);
-                        });
-                    }
-                    None => {
-                        // No requests available, sleep briefly
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                    }
-                }
-            }
-        });
-
-        println!("⬇️  Downloader thread {} stopped", thread_id);
     }
 
     // CORRECTED: Spider Manager pushes to scheduler
