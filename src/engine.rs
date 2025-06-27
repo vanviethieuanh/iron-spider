@@ -3,7 +3,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use crossbeam::channel::unbounded;
@@ -14,6 +14,7 @@ use crate::{
     downloader::Downloader,
     errors::EngineError,
     item::ResultItem,
+    monitor::EngineMonitor,
     pipeline::manager::PipelineManager,
     response::Response,
     scheduler::Scheduler,
@@ -24,12 +25,13 @@ pub struct Engine {
     scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
     spider_manager: Arc<SpiderManager>,
     pipeline_manager: Arc<PipelineManager>,
-    config: EngineConfig,
     downloader: Arc<Downloader>,
 
     active_requests: Arc<AtomicUsize>,
     shutdown_signal: Arc<AtomicBool>,
-    last_activity: Arc<std::sync::Mutex<Instant>>,
+    last_activity: Arc<Mutex<Instant>>,
+
+    config: EngineConfig,
 }
 
 impl Engine {
@@ -59,7 +61,7 @@ impl Engine {
             downloader,
             active_requests: Arc::new(AtomicUsize::new(0)),
             shutdown_signal: Arc::new(AtomicBool::new(false)),
-            last_activity: Arc::new(std::sync::Mutex::new(Instant::now())),
+            last_activity: Arc::new(Mutex::new(Instant::now())),
         }
     }
 
@@ -74,11 +76,6 @@ impl Engine {
         let (resp_sender, resp_receiver) = unbounded::<Response>();
         let (item_sender, item_receiver) = unbounded::<ResultItem>();
 
-        // Create shared state
-        let active_requests = Arc::clone(&self.active_requests);
-        let shutdown_signal = Arc::clone(&self.shutdown_signal);
-        let last_activity = Arc::clone(&self.last_activity);
-
         // Use crossbeam::scope for structured concurrency
         crossbeam::scope(|scope| {
             // 1. Spawn Spider Manager Thread
@@ -87,9 +84,9 @@ impl Engine {
                 let scheduler = Arc::clone(&self.scheduler);
                 let resp_receiver = resp_receiver.clone();
                 let item_sender = item_sender.clone();
-                let shutdown_signal = Arc::clone(&shutdown_signal);
+                let shutdown_signal = Arc::clone(&self.shutdown_signal);
                 let err_handler_shutdown_signal = Arc::clone(&shutdown_signal);
-                let last_activity = Arc::clone(&last_activity);
+                let last_activity = Arc::clone(&self.last_activity);
 
                 let spider_manager = self.spider_manager.clone();
 
@@ -115,9 +112,9 @@ impl Engine {
 
                 let scheduler = Arc::clone(&self.scheduler);
                 let resp_sender = resp_sender.clone();
-                let active_requests = Arc::clone(&active_requests);
-                let shutdown_signal = Arc::clone(&shutdown_signal);
-                let last_activity = Arc::clone(&last_activity);
+                let active_requests = Arc::clone(&self.active_requests);
+                let shutdown_signal = Arc::clone(&self.shutdown_signal);
+                let last_activity = Arc::clone(&self.last_activity);
 
                 scope.spawn(move |_| {
                     downloader.start(
@@ -133,7 +130,7 @@ impl Engine {
             // 3. Pipeline Manager threads
             let _pipeline_handles = {
                 let item_receiver = item_receiver.clone();
-                let shutdown_signal = Arc::clone(&shutdown_signal);
+                let shutdown_signal = Arc::clone(&self.shutdown_signal);
                 let pipeline_manager = Arc::clone(&self.pipeline_manager);
 
                 scope.spawn(move |_| pipeline_manager.start(item_receiver, shutdown_signal))
@@ -141,21 +138,17 @@ impl Engine {
 
             // 5. Spawn Health Check & Stats Thread
             let health_handle = {
-                let active_requests = Arc::clone(&active_requests);
-                let shutdown_signal = Arc::clone(&shutdown_signal);
-                let last_activity = Arc::clone(&last_activity);
-                let config = self.config.clone();
-                let scheduler = Arc::clone(&self.scheduler);
+                let health_check = EngineMonitor::new(
+                    Arc::clone(&self.active_requests),
+                    Arc::clone(&self.scheduler),
+                    Arc::clone(&self.shutdown_signal),
+                    Arc::clone(&self.last_activity),
+                    self.config.clone(),
+                );
 
                 scope.spawn(move |_| {
                     println!("💊 Health check thread started");
-                    Self::run_health_check(
-                        active_requests,
-                        scheduler,
-                        shutdown_signal,
-                        last_activity,
-                        config,
-                    )
+                    health_check.start();
                 })
             };
 
@@ -168,56 +161,5 @@ impl Engine {
             Ok(())
         })
         .unwrap()
-    }
-
-    // CORRECTED: Health check includes scheduler state
-    fn run_health_check(
-        active_requests: Arc<AtomicUsize>,
-        scheduler: Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
-        shutdown_signal: Arc<AtomicBool>,
-        last_activity: Arc<std::sync::Mutex<Instant>>,
-        config: EngineConfig,
-    ) {
-        let mut stats_timer = Instant::now();
-
-        loop {
-            std::thread::sleep(Duration::from_secs(1));
-
-            // Print stats periodically
-            if stats_timer.elapsed() >= config.stats_interval {
-                let active = active_requests.load(Ordering::Relaxed);
-                let scheduler_empty = {
-                    let sched = scheduler.lock().unwrap();
-                    sched.is_empty()
-                };
-                println!(
-                    "📊 Active requests: {}, Scheduler empty: {}",
-                    active, scheduler_empty
-                );
-                stats_timer = Instant::now();
-            }
-
-            // Check for shutdown conditions
-            let last_activity_time = *last_activity.lock().unwrap();
-            let idle_time = last_activity_time.elapsed();
-            let active = active_requests.load(Ordering::Relaxed);
-            let scheduler_empty = {
-                let sched = scheduler.lock().unwrap();
-                sched.is_empty()
-            };
-
-            // Shutdown when: no active requests AND scheduler is empty AND idle timeout
-            if active == 0 && scheduler_empty && idle_time >= config.idle_timeout {
-                println!("⏰ All work completed, initiating shutdown...");
-                shutdown_signal.store(true, Ordering::Relaxed);
-                break;
-            }
-
-            if shutdown_signal.load(Ordering::Relaxed) {
-                break;
-            }
-        }
-
-        println!("💊 Health check thread stopped");
     }
 }
