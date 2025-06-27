@@ -90,10 +90,9 @@ impl ExampleSpider {
     }
 }
 
-#[async_trait]
 impl Spider for ExampleSpider {
     fn start_requests(&self) -> Vec<Request> {
-        (1..50000)
+        (1..10)
             .map(|_| {
                 let url = format!("http://127.0.0.1:5000/article/{}", 3)
                     .parse::<Url>()
@@ -146,6 +145,10 @@ impl Spider for ExampleSpider {
             info!("Empty response");
             SpiderResult::None
         }
+    }
+
+    fn close(&self) {
+        info!("Heyyyyyy, I'm leaving!!!");
     }
 }
 
