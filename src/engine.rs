@@ -30,7 +30,7 @@ pub struct Engine {
     shutdown_signal: Arc<AtomicBool>,
     last_activity: Arc<Mutex<Instant>>,
 
-    config: EngineConfig,
+    config: EngineConfig
 }
 
 impl Engine {
