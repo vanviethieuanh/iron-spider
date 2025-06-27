@@ -76,7 +76,7 @@ impl Engine {
 
         // Use crossbeam::scope for structured concurrency
         crossbeam::scope(|scope| {
-            // 1. Spawn Spider Manager Thread
+            // 1. Spawn Spider Manager thread
             // Spider Manager pushes requests to scheduler
             let _spider_handle = {
                 let scheduler = Arc::clone(&self.scheduler);
@@ -103,9 +103,9 @@ impl Engine {
                 })
             };
 
-            // 2. Spawn Downloader Thread
+            // 2. Spawn Downloader thread
             // Downloader pulls requests directly from scheduler
-            let _downloader_handles = {
+            let _downloader_handle = {
                 let downloader = self.downloader.clone();
 
                 let scheduler = Arc::clone(&self.scheduler);
@@ -118,8 +118,8 @@ impl Engine {
                 })
             };
 
-            // 3. Pipeline Manager threads
-            let _pipeline_handles = {
+            // 3. Pipeline Manager thread
+            let _pipeline_handle = {
                 let item_receiver = item_receiver.clone();
                 let shutdown_signal = Arc::clone(&self.shutdown_signal);
                 let pipeline_manager = Arc::clone(&self.pipeline_manager);
