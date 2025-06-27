@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossbeam::channel::{Receiver, unbounded};
+use crossbeam::channel::unbounded;
 use tracing::{error, info};
 
 use crate::{
@@ -131,23 +131,13 @@ impl Engine {
             };
 
             // 3. Pipeline Manager threads
-            let _pipeline_handles: Vec<_> = (0..self.config.pipeline_worker_threads)
-                .map(|i| {
-                    let item_receiver = item_receiver.clone();
-                    let shutdown_signal = Arc::clone(&shutdown_signal);
-                    let pipeline_manager = Arc::clone(&self.pipeline_manager);
+            let _pipeline_handles = {
+                let item_receiver = item_receiver.clone();
+                let shutdown_signal = Arc::clone(&shutdown_signal);
+                let pipeline_manager = Arc::clone(&self.pipeline_manager);
 
-                    scope.spawn(move |_| {
-                        println!("🔧 Pipeline Manager thread {} started", i);
-                        Self::run_pipeline_manager(
-                            i as usize,
-                            pipeline_manager,
-                            item_receiver,
-                            shutdown_signal,
-                        )
-                    })
-                })
-                .collect();
+                scope.spawn(move |_| pipeline_manager.start(item_receiver, shutdown_signal))
+            };
 
             // 5. Spawn Health Check & Stats Thread
             let health_handle = {
@@ -178,27 +168,6 @@ impl Engine {
             Ok(())
         })
         .unwrap()
-    }
-
-    fn run_pipeline_manager(
-        thread_id: usize,
-        pipeline_manager: Arc<PipelineManager>,
-        item_receiver: Receiver<ResultItem>,
-        shutdown_signal: Arc<AtomicBool>,
-    ) {
-        while !shutdown_signal.load(Ordering::Relaxed) {
-            match item_receiver.try_recv() {
-                Ok(item) => {
-                    // Process item through pipeline
-                    pipeline_manager.process_item(item);
-                }
-                Err(_) => {
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-            }
-        }
-
-        println!("🔧 Pipeline Manager thread {} stopped", thread_id);
     }
 
     // CORRECTED: Health check includes scheduler state

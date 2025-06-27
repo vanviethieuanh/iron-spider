@@ -3,10 +3,12 @@ use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
+    time::Duration,
 };
 
+use crossbeam::channel::Receiver;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use tracing::warn;
 
@@ -130,5 +132,21 @@ impl PipelineManager {
                 }
             }
         }
+    }
+
+    pub fn start(&self, item_receiver: Receiver<ResultItem>, shutdown_signal: Arc<AtomicBool>) {
+        while !shutdown_signal.load(Ordering::Relaxed) {
+            match item_receiver.try_recv() {
+                Ok(item) => {
+                    // Process item through pipeline
+                    self.process_item(item);
+                }
+                Err(_) => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+
+        println!("🔧 Pipeline Manager thread stopped");
     }
 }
