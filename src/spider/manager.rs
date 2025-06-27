@@ -1,71 +1,26 @@
-use core::error;
 use std::{
-    any::Any,
     collections::HashMap,
     fmt::Debug,
     sync::{
-        Arc, RwLock,
+        Arc,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
 
-use async_trait::async_trait;
 use crossbeam::channel::{Receiver, Sender};
-use reqwest::{Method, Url, header::HeaderMap};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::{
     errors::EngineError,
+    item::ResultItem,
     request::{IronRequest, Request},
     response::Response,
     scheduler::Scheduler,
+    spider::spider::{Spider, SpiderResult, SpiderState},
 };
 
 static SPIDER_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
-
-pub type ResultItem = Box<dyn Any + Send + Sync>;
-
-#[derive(Debug)]
-pub struct SpiderState {
-    // in-flight request counts
-    pub in_flight_requests: AtomicUsize,
-
-    // Count of all created requests
-    pub created_requests: AtomicUsize,
-}
-
-impl SpiderState {
-    pub fn new() -> Self {
-        Self {
-            in_flight_requests: AtomicUsize::new(0),
-            created_requests: AtomicUsize::new(0),
-        }
-    }
-
-    pub fn is_activated(&self) -> bool {
-        self.in_flight_requests.load(Ordering::SeqCst) > 0
-    }
-}
-
-pub enum SpiderResult {
-    Requests(Vec<Request>),
-    Items(Vec<ResultItem>),
-    Both {
-        requests: Vec<Request>,
-        items: Vec<ResultItem>,
-    },
-    None,
-}
-
-pub trait Spider: Send + Sync + Debug {
-    fn name(&self) -> &str;
-    fn start_requests(&self) -> Vec<Request>;
-    fn parse(&self, response: Response) -> SpiderResult;
-    fn close(&self) {
-        debug!("Closing spider: {}", self.name());
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct RegisteredSpider {

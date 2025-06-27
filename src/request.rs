@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use reqwest::Url;
 
-use crate::spider::RegisteredSpider;
+use crate::spider::manager::RegisteredSpider;
 
 #[derive(Clone, Debug)]
 pub struct Request {

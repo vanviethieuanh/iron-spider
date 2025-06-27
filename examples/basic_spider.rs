@@ -8,11 +8,11 @@ use async_trait::async_trait;
 use iron_spider::{
     config::EngineConfig,
     engine::Engine,
-    pipeline::{FnPipeline, Pipeline, PipelineManager},
+    pipeline::{fn_pipeline::FnPipeline, manager::PipelineManager},
     request::{Request, RequestBuilder},
     response::Response,
     scheduler::SimpleScheduler,
-    spider::{Spider, SpiderResult},
+    spider::spider::{Spider, SpiderResult},
 };
 use regex::Regex;
 use reqwest::Url;

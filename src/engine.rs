@@ -13,10 +13,11 @@ use crate::{
     config::EngineConfig,
     downloader::Downloader,
     errors::EngineError,
-    pipeline::PipelineManager,
+    item::ResultItem,
+    pipeline::manager::PipelineManager,
     response::Response,
     scheduler::Scheduler,
-    spider::{ResultItem, Spider, SpiderManager},
+    spider::{manager::SpiderManager, spider::Spider},
 };
 
 pub struct Engine {
