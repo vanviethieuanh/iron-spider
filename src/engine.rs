@@ -1,7 +1,7 @@
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
     time::Instant,
 };
@@ -30,7 +30,7 @@ pub struct Engine {
     shutdown_signal: Arc<AtomicBool>,
     last_activity: Arc<Mutex<Instant>>,
 
-    config: EngineConfig
+    config: EngineConfig,
 }
 
 impl Engine {
