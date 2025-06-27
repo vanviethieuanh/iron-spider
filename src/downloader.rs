@@ -100,7 +100,6 @@ impl Downloader {
         &self,
         scheduler: Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
         resp_sender: Sender<Response>,
-        active_requests: Arc<AtomicUsize>,
         shutdown_signal: Arc<AtomicBool>,
         last_activity: Arc<std::sync::Mutex<Instant>>,
     ) {
@@ -121,8 +120,6 @@ impl Downloader {
                         self.waiting_requests.fetch_add(1, Ordering::Relaxed);
                         *last_activity.lock().unwrap() = Instant::now();
 
-                        let engine_active_requests = Arc::clone(&active_requests);
-
                         let client = self.client.clone();
                         let resp_sender = resp_sender.clone();
                         let download_sem = self.download_sem.clone();
@@ -138,7 +135,6 @@ impl Downloader {
                             }
                             let _permit = download_sem.acquire().await.unwrap();
 
-                            engine_active_requests.fetch_add(1, Ordering::Relaxed);
                             waiting_requests.fetch_sub(1, Ordering::Relaxed);
                             active_requests.fetch_add(1, Ordering::Relaxed);
 
@@ -152,7 +148,6 @@ impl Downloader {
                                 .await;
 
                             active_requests.fetch_sub(1, Ordering::Relaxed);
-                            engine_active_requests.fetch_sub(1, Ordering::Relaxed);
                             drop(_permit);
 
                             match resp {

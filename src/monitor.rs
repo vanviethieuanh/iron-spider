@@ -1,15 +1,15 @@
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
 
-use crate::{config::EngineConfig, scheduler::Scheduler};
+use crate::{config::EngineConfig, downloader::Downloader, scheduler::Scheduler};
 
 pub struct EngineMonitor {
-    active_requests: Arc<AtomicUsize>,
+    downloader: Arc<Downloader>,
     scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
     shutdown_signal: Arc<AtomicBool>,
     last_activity: Arc<Mutex<Instant>>,
@@ -18,14 +18,14 @@ pub struct EngineMonitor {
 
 impl EngineMonitor {
     pub fn new(
-        active_requests: Arc<AtomicUsize>,
+        downloader: Arc<Downloader>,
         scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
         shutdown_signal: Arc<AtomicBool>,
         last_activity: Arc<Mutex<Instant>>,
         config: EngineConfig,
     ) -> Self {
         Self {
-            active_requests,
+            downloader,
             scheduler,
             shutdown_signal,
             last_activity,
@@ -39,8 +39,8 @@ impl EngineMonitor {
         loop {
             std::thread::sleep(Duration::from_secs(1));
 
+            let active = self.downloader.get_stats().active_requests;
             if stats_timer.elapsed() >= self.config.stats_interval {
-                let active = self.active_requests.load(Ordering::Relaxed);
                 let scheduler_empty = self.scheduler.lock().unwrap().is_empty();
 
                 println!(
@@ -52,7 +52,6 @@ impl EngineMonitor {
             }
 
             let idle_time = self.last_activity.lock().unwrap().elapsed();
-            let active = self.active_requests.load(Ordering::Relaxed);
             let scheduler_empty = self.scheduler.lock().unwrap().is_empty();
 
             if active == 0 && scheduler_empty && idle_time >= self.config.idle_timeout {

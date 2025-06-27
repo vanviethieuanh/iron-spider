@@ -27,7 +27,6 @@ pub struct Engine {
     pipeline_manager: Arc<PipelineManager>,
     downloader: Arc<Downloader>,
 
-    active_requests: Arc<AtomicUsize>,
     shutdown_signal: Arc<AtomicBool>,
     last_activity: Arc<Mutex<Instant>>,
 
@@ -59,7 +58,6 @@ impl Engine {
             pipeline_manager: Arc::new(pipelines),
             config,
             downloader,
-            active_requests: Arc::new(AtomicUsize::new(0)),
             shutdown_signal: Arc::new(AtomicBool::new(false)),
             last_activity: Arc::new(Mutex::new(Instant::now())),
         }
@@ -112,18 +110,11 @@ impl Engine {
 
                 let scheduler = Arc::clone(&self.scheduler);
                 let resp_sender = resp_sender.clone();
-                let active_requests = Arc::clone(&self.active_requests);
                 let shutdown_signal = Arc::clone(&self.shutdown_signal);
                 let last_activity = Arc::clone(&self.last_activity);
 
                 scope.spawn(move |_| {
-                    downloader.start(
-                        scheduler,
-                        resp_sender,
-                        active_requests,
-                        shutdown_signal,
-                        last_activity,
-                    )
+                    downloader.start(scheduler, resp_sender, shutdown_signal, last_activity)
                 })
             };
 
@@ -139,7 +130,7 @@ impl Engine {
             // 5. Spawn Health Check & Stats Thread
             let health_handle = {
                 let health_check = EngineMonitor::new(
-                    Arc::clone(&self.active_requests),
+                    Arc::clone(&self.downloader),
                     Arc::clone(&self.scheduler),
                     Arc::clone(&self.shutdown_signal),
                     Arc::clone(&self.last_activity),
