@@ -6,30 +6,22 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossbeam::channel::{Receiver, Sender, unbounded};
-use governor::{
-    RateLimiter,
-    clock::DefaultClock,
-    state::{InMemoryState, NotKeyed},
-};
-use reqwest::Client;
-use tokio::{runtime::Runtime, sync::Semaphore, task::JoinSet};
-use tracing::{debug, error, info, warn};
+use crossbeam::channel::{Receiver, unbounded};
+use tracing::{error, info};
 
 use crate::{
-    config::{self, EngineConfig},
+    config::EngineConfig,
     downloader::Downloader,
     errors::EngineError,
     pipeline::PipelineManager,
-    request::Request,
     response::Response,
-    scheduler::{Scheduler, SimpleScheduler},
-    spider::{ResultItem, Spider, SpiderResult},
+    scheduler::Scheduler,
+    spider::{ResultItem, Spider, SpiderManager},
 };
 
 pub struct Engine {
     scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
-    spiders: Vec<Box<dyn Spider>>,
+    spider_manager: Arc<SpiderManager>,
     pipeline_manager: Arc<PipelineManager>,
     config: EngineConfig,
     downloader: Arc<Downloader>,
@@ -42,7 +34,7 @@ pub struct Engine {
 impl Engine {
     pub fn new(
         scheduler: Box<dyn Scheduler + Send + Sync>,
-        spiders: Vec<Box<dyn Spider>>,
+        spiders: Vec<Arc<dyn Spider>>,
         pipelines: PipelineManager,
         config: Option<EngineConfig>,
     ) -> Self {
@@ -56,9 +48,11 @@ impl Engine {
             }
         };
 
+        let spider_manager = Arc::new(SpiderManager::new(spiders));
+
         Self {
             scheduler: Arc::new(Mutex::new(scheduler)),
-            spiders,
+            spider_manager,
             pipeline_manager: Arc::new(pipelines),
             config,
             downloader,
@@ -69,9 +63,10 @@ impl Engine {
     }
 
     pub fn start(&mut self) -> Result<(), EngineError> {
+        let spider_stats = self.spider_manager.get_stats();
         info!(
             "🕷️ Starting Iron-Spider Engine {} spiders",
-            self.spiders.len()
+            spider_stats.total_spiders
         );
 
         // Create communication channels
@@ -85,10 +80,34 @@ impl Engine {
 
         // Use crossbeam::scope for structured concurrency
         crossbeam::scope(|scope| {
-            // 0. Seed initial requests
-            self.seed_initial_requests_to_scheduler()?;
+            // 1. Spawn Spider Manager Thread
+            // Spider Manager pushes requests to scheduler
+            let _spider_handle = {
+                let scheduler = Arc::clone(&self.scheduler);
+                let resp_receiver = resp_receiver.clone();
+                let item_sender = item_sender.clone();
+                let shutdown_signal = Arc::clone(&shutdown_signal);
+                let err_handler_shutdown_signal = Arc::clone(&shutdown_signal);
+                let last_activity = Arc::clone(&last_activity);
 
-            // 1. Spawn Downloader Thread
+                let spider_manager = self.spider_manager.clone();
+
+                scope.spawn(move |_| {
+                    if let Err(err) = spider_manager.start(
+                        scheduler,
+                        resp_receiver,
+                        item_sender,
+                        shutdown_signal,
+                        last_activity,
+                    ) {
+                        error!("❌ SpiderManager crashed: {}", err);
+                        err_handler_shutdown_signal.store(true, Ordering::SeqCst);
+                    }
+                    println!("🕷️  Spider Manager thread started");
+                })
+            };
+
+            // 2. Spawn Downloader Thread
             // Downloader pulls requests directly from scheduler
             let _downloader_handles = {
                 let downloader = self.downloader.clone();
@@ -98,7 +117,6 @@ impl Engine {
                 let active_requests = Arc::clone(&active_requests);
                 let shutdown_signal = Arc::clone(&shutdown_signal);
                 let last_activity = Arc::clone(&last_activity);
-                let config = self.config.clone();
 
                 scope.spawn(move |_| {
                     downloader.start(
@@ -107,37 +125,11 @@ impl Engine {
                         active_requests,
                         shutdown_signal,
                         last_activity,
-                        &config,
                     )
                 })
             };
 
-            // 2. Spawn Spider Manager Thread
-            // Spider Manager pushes requests to scheduler
-            let _spider_handle = {
-                let scheduler = Arc::clone(&self.scheduler);
-                let resp_receiver = resp_receiver.clone();
-                let item_sender = item_sender.clone();
-                let active_requests = Arc::clone(&active_requests);
-                let shutdown_signal = Arc::clone(&shutdown_signal);
-                let last_activity = Arc::clone(&last_activity);
-                let spiders = std::mem::take(&mut self.spiders);
-
-                scope.spawn(move |_| {
-                    println!("🕷️  Spider Manager thread started");
-                    Self::run_spider_manager(
-                        spiders,
-                        scheduler,
-                        resp_receiver,
-                        item_sender,
-                        active_requests,
-                        shutdown_signal,
-                        last_activity,
-                    )
-                })
-            };
-
-            // 3. Pipeline Manager threads (unchanged)
+            // 3. Pipeline Manager threads
             let _pipeline_handles: Vec<_> = (0..self.config.pipeline_worker_threads)
                 .map(|i| {
                     let item_receiver = item_receiver.clone();
@@ -185,70 +177,6 @@ impl Engine {
             Ok(())
         })
         .unwrap()
-    }
-
-    // CORRECTED: Spider Manager pushes to scheduler
-    fn run_spider_manager(
-        spiders: Vec<Box<dyn Spider>>,
-        scheduler: Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
-        resp_receiver: Receiver<Response>,
-        item_sender: Sender<ResultItem>,
-        active_requests: Arc<AtomicUsize>,
-        shutdown_signal: Arc<AtomicBool>,
-        last_activity: Arc<std::sync::Mutex<Instant>>,
-    ) {
-        while !shutdown_signal.load(Ordering::Relaxed) {
-            match resp_receiver.try_recv() {
-                Ok(response) => {
-                    *last_activity.lock().unwrap() = Instant::now();
-
-                    let spider_result = response.request.spider.parse(response.clone());
-                    match spider_result {
-                        SpiderResult::Requests(requests) => {
-                            // Push new requests to scheduler
-                            let mut sched = scheduler.lock().unwrap();
-                            for request in requests {
-                                if let Err(e) = sched.enqueue(request) {
-                                    eprintln!("Failed to enqueue request: {:?}", e);
-                                }
-                            }
-                        }
-                        SpiderResult::Items(items) => {
-                            // Send items to pipeline
-                            for item in items {
-                                if item_sender.send(item).is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                        SpiderResult::Both { requests, items } => {
-                            // Handle both requests and items
-                            let mut sched = scheduler.lock().unwrap();
-                            for request in requests {
-                                if let Err(e) = sched.enqueue(request) {
-                                    eprintln!("Failed to enqueue request: {:?}", e);
-                                }
-                            }
-                            drop(sched); // Release lock before sending items
-
-                            for item in items {
-                                if item_sender.send(item).is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                        SpiderResult::None => {
-                            // No action needed
-                        }
-                    }
-                }
-                Err(_) => {
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-            }
-        }
-
-        println!("🕷️  Spider Manager thread stopped");
     }
 
     fn run_pipeline_manager(
@@ -321,87 +249,5 @@ impl Engine {
         }
 
         println!("💊 Health check thread stopped");
-    }
-
-    fn seed_initial_requests_to_scheduler(&self) -> Result<(), EngineError> {
-        println!("🌱 Seeding initial requests to scheduler...");
-
-        let mut sched = self.scheduler.lock().unwrap();
-        let mut start_requests_count = 0;
-
-        println!("Heyyyyyyyyyyyyyyyyyy, {}", &self.spiders.iter().count());
-
-        // Get start requests from each spider
-        for spider in &self.spiders {
-            let start_requests = spider.start_requests();
-
-            for request in start_requests {
-                sched.enqueue(request).map_err(|e| {
-                    EngineError::InitializationError(format!("Failed to seed request: {:?}", e))
-                })?;
-                start_requests_count += 1;
-            }
-        }
-
-        println!("🌱 Seeded {} initial requests", start_requests_count);
-        Ok(())
-    }
-
-    async fn perform_request(
-        config: &EngineConfig,
-        client: &reqwest::Client,
-        request: Request,
-        download_sem: Arc<Semaphore>,
-    ) -> Option<Response> {
-        let _permit = download_sem.acquire().await.unwrap();
-
-        // Implement actual HTTP request logic here
-        // This is a placeholder
-        let req_clone = request.clone();
-        let resp = client
-            .request(request.method, request.url)
-            .headers(request.headers.unwrap_or_default())
-            .body(request.body.unwrap_or_default())
-            .send()
-            .await;
-
-        match resp {
-            Ok(r) => {
-                let status = r.status();
-                let url = r.url().clone();
-
-                if r.error_for_status_ref().is_ok()
-                    || config.http_error_allow_codes.contains(&status)
-                {
-                    let body = r.text().await.unwrap_or_default();
-                    Some(Response {
-                        status,
-                        body,
-                        request: req_clone,
-                    })
-                } else {
-                    error!("Status error [{}]: {}", status, url);
-                    None
-                }
-            }
-            Err(e) => {
-                if e.is_timeout() {
-                    error!("Timeout: {} -> {}", req_clone.url, e);
-                } else if e.is_connect() {
-                    error!(
-                        "Connection error (maybe server not started): {} -> {}",
-                        req_clone.url, e
-                    );
-                } else if e.is_request() {
-                    error!("Bad request formation: {} -> {}", req_clone.url, e);
-                } else if e.is_body() {
-                    error!("Body error: {} -> {}", req_clone.url, e);
-                } else {
-                    error!("Request failed (other): {} -> {:?}", req_clone.url, e);
-                }
-
-                None
-            }
-        }
     }
 }

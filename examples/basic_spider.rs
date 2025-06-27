@@ -9,7 +9,7 @@ use iron_spider::{
     config::EngineConfig,
     engine::Engine,
     pipeline::{FnPipeline, Pipeline, PipelineManager},
-    request::Request,
+    request::{Request, RequestBuilder},
     response::Response,
     scheduler::SimpleScheduler,
     spider::{Spider, SpiderResult},
@@ -25,7 +25,7 @@ pub struct ArticleItem {
     pub author: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ExampleSpider {
     pub discovered: Arc<RwLock<HashSet<String>>>,
 }
@@ -98,7 +98,12 @@ impl Spider for ExampleSpider {
                 let url = format!("http://127.0.0.1:5000/article/{}", 3)
                     .parse::<Url>()
                     .expect("Invalid URL");
-                self.request(url, reqwest::Method::GET, None, None, None)
+
+                RequestBuilder::new()
+                    .url(url)
+                    .method(reqwest::Method::GET)
+                    .build()
+                    .expect("Failed to build request")
             })
             .collect()
     }
@@ -108,31 +113,30 @@ impl Spider for ExampleSpider {
     }
 
     fn parse(&self, response: Response) -> SpiderResult {
-        if let Some(item) = ExampleSpider::parse_article_html(&response.body) {
+        if let Some(item) = response
+            .text()
+            .as_deref()
+            .and_then(ExampleSpider::parse_article_html)
+        {
             match extract_number(item.title.as_str()) {
                 Some(i) => {
-                    if i != 1 {
-                        self.mark_discovered(response.request.url.to_string());
+                    self.mark_discovered(response.url.to_string());
 
+                    if i != 1 {
                         let next_url_str = format!("./article/{}", i - 1);
-                        let next_url = response
-                            .request
-                            .url
-                            .join(&next_url_str)
-                            .expect("Invalid next URL");
+                        let next_url = response.url.join(&next_url_str).expect("Invalid next URL");
+
+                        let next_request = RequestBuilder::new()
+                            .url(next_url)
+                            .method(reqwest::Method::GET)
+                            .build()
+                            .expect("Failed to build next request");
 
                         SpiderResult::Both {
-                            requests: vec![self.request(
-                                next_url,
-                                reqwest::Method::GET,
-                                None,
-                                None,
-                                None,
-                            )],
+                            requests: vec![next_request],
                             items: vec![Box::new(item)],
                         }
                     } else {
-                        self.mark_discovered(response.request.url.to_string());
                         SpiderResult::Items(vec![Box::new(item)])
                     }
                 }
@@ -162,7 +166,7 @@ fn main() {
 
     let scheduler = Box::new(SimpleScheduler::new());
     let example_spider = Arc::new(ExampleSpider::new());
-    let spiders: Vec<Box<dyn Spider>> = vec![Box::new((*example_spider).clone())];
+    let spiders: Vec<Arc<dyn Spider>> = vec![Arc::new((*example_spider).clone())];
 
     let print_article_pipe = FnPipeline::new(|item: Option<ArticleItem>| {
         info!("Article item pipeline: {:?}", item);

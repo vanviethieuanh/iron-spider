@@ -16,6 +16,27 @@ use crate::errors::EngineError;
 use crate::response::Response;
 use crate::scheduler::Scheduler;
 
+use std::fmt;
+
+#[derive(Debug, Clone)]
+pub struct DownloaderStats {
+    /// Number of requests currently being processed
+    pub active_requests: usize,
+
+    /// Number of requests currently waiting for semaphore
+    pub waiting_requests: usize,
+}
+
+impl fmt::Display for DownloaderStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Active: {}, Waiting: {}",
+            self.active_requests, self.waiting_requests
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct Downloader {
     client: reqwest::Client,
@@ -59,6 +80,17 @@ impl Downloader {
         })
     }
 
+    pub fn get_stats(&self) -> DownloaderStats {
+        DownloaderStats {
+            active_requests: self
+                .active_requests
+                .load(std::sync::atomic::Ordering::Relaxed),
+            waiting_requests: self
+                .waiting_requests
+                .load(std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+
     pub fn is_idle(&self) -> bool {
         self.active_requests.load(Ordering::SeqCst) == 0
     }
@@ -71,7 +103,6 @@ impl Downloader {
         active_requests: Arc<AtomicUsize>,
         shutdown_signal: Arc<AtomicBool>,
         last_activity: Arc<std::sync::Mutex<Instant>>,
-        config: &EngineConfig,
     ) {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
 
@@ -86,7 +117,7 @@ impl Downloader {
                 };
 
                 match request {
-                    Some(req) => {
+                    Some(iron_req) => {
                         self.waiting_requests.fetch_add(1, Ordering::Relaxed);
                         *last_activity.lock().unwrap() = Instant::now();
 
@@ -94,7 +125,6 @@ impl Downloader {
 
                         let client = self.client.clone();
                         let resp_sender = resp_sender.clone();
-                        let config = config.clone();
                         let download_sem = self.download_sem.clone();
                         let http_error_allow_codes = self.http_error_allow_codes.clone();
                         let waiting_requests = self.waiting_requests.clone();
@@ -112,11 +142,12 @@ impl Downloader {
                             waiting_requests.fetch_sub(1, Ordering::Relaxed);
                             active_requests.fetch_add(1, Ordering::Relaxed);
 
-                            let req_clone = req.clone();
+                            let actual_request = iron_req.request.clone();
+                            let request_url = actual_request.url.clone();
                             let resp = client
-                                .request(req.method, req.url)
-                                .headers(req.headers.unwrap_or_default())
-                                .body(req.body.unwrap_or_default())
+                                .request(actual_request.method, actual_request.url)
+                                .headers(actual_request.headers.unwrap_or_default())
+                                .body(actual_request.body.unwrap_or_default())
                                 .send()
                                 .await;
 
@@ -127,16 +158,22 @@ impl Downloader {
                             match resp {
                                 Ok(r) => {
                                     let status = r.status();
-                                    let url = r.url().clone();
+                                    let is_status_accepted = r.error_for_status_ref().is_ok()
+                                        || http_error_allow_codes.contains(&status);
 
-                                    if r.error_for_status_ref().is_ok()
-                                        || http_error_allow_codes.contains(&status)
-                                    {
-                                        let body = r.text().await.unwrap_or_default();
+                                    let url = r.url().clone();
+                                    let headers = r.headers().clone();
+                                    let version = format!("{:?}", r.version()); // e.g., HTTP/1.1, H2
+                                    let body = r.bytes().await.unwrap_or_default().to_vec();
+
+                                    if is_status_accepted {
                                         let _ = resp_sender.send(Response {
+                                            url,
                                             status,
+                                            headers,
                                             body,
-                                            request: req_clone,
+                                            request: Arc::new(iron_req),
+                                            protocol: Some(version),
                                         });
                                     } else {
                                         error!("Status error [{}]: {}", status, url);
@@ -144,20 +181,20 @@ impl Downloader {
                                 }
                                 Err(e) => {
                                     if e.is_timeout() {
-                                        error!("Timeout: {} -> {}", req_clone.url, e);
+                                        error!("Timeout: {} -> {}", request_url, e);
                                     } else if e.is_connect() {
                                         error!(
                                             "Connection error (maybe server not started): {} -> {}",
-                                            req_clone.url, e
+                                            request_url, e
                                         );
                                     } else if e.is_request() {
-                                        error!("Bad request formation: {} -> {}", req_clone.url, e);
+                                        error!("Bad request formation: {} -> {}", request_url, e);
                                     } else if e.is_body() {
-                                        error!("Body error: {} -> {}", req_clone.url, e);
+                                        error!("Body error: {} -> {}", request_url, e);
                                     } else {
                                         error!(
                                             "Request failed (other): {} -> {:?}",
-                                            req_clone.url, e
+                                            request_url, e
                                         );
                                     }
                                 }
