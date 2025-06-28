@@ -9,7 +9,7 @@ use governor::clock::DefaultClock;
 use governor::state::{InMemoryState, NotKeyed};
 use reqwest::{Client, StatusCode};
 use tokio::sync::Semaphore;
-use tracing::error;
+use tracing::{error, info};
 
 use crate::config::EngineConfig;
 use crate::downloader::stat::{DownloaderStats, StatsTracker};
@@ -194,6 +194,6 @@ impl Downloader {
             }
         });
 
-        println!("⬇️  Downloader thread stopped");
+        info!("⬇️  Downloader thread stopped");
     }
 }

@@ -10,7 +10,7 @@ use std::{
 
 use crossbeam::channel::Receiver;
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{config::EngineConfig, item::ResultItem, pipeline::pipeline::Pipeline};
 
@@ -147,6 +147,6 @@ impl PipelineManager {
             }
         }
 
-        println!("🔧 Pipeline Manager thread stopped");
+        info!("🔧 Pipeline Manager thread stopped");
     }
 }

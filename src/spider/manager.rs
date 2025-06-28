@@ -241,7 +241,7 @@ impl SpiderManager {
             }
         }
 
-        println!("🕷️  Spider Manager thread stopped");
+        info!("🕷️  Spider Manager thread stopped");
         Ok(())
     }
 
@@ -249,7 +249,7 @@ impl SpiderManager {
         &self,
         scheduler: Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
     ) -> Result<(), EngineError> {
-        println!("🌱 Seeding initial requests to scheduler...");
+        info!("🌱 Seeding initial requests to scheduler...");
 
         let mut sched = scheduler.lock().unwrap();
         let mut start_requests_count = 0;
@@ -279,7 +279,7 @@ impl SpiderManager {
             }
         }
 
-        println!("🌱 Seeded {} initial requests", start_requests_count);
+        info!("🌱 Seeded {} initial requests", start_requests_count);
         Ok(())
     }
 }

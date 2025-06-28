@@ -16,7 +16,7 @@ use iron_spider::{
 use regex::Regex;
 use reqwest::Url;
 use scraper::{Html, Selector};
-use tracing::{Level, info};
+use tracing::info;
 
 #[derive(Debug)]
 pub struct ArticleItem {
@@ -152,9 +152,9 @@ impl Spider for ExampleSpider {
 }
 
 fn main() {
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO) // Or "debug" for more verbose logs
-        .init();
+    // tracing_subscriber::fmt()
+    //     .with_max_level(Level::INFO) // Or "debug" for more verbose logs
+    //     .init();
 
     let mut http_error_allow_codes = HashSet::new();
     http_error_allow_codes.insert(reqwest::StatusCode::NOT_FOUND);

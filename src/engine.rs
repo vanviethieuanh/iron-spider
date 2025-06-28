@@ -99,7 +99,7 @@ impl Engine {
                         error!("❌ SpiderManager crashed: {}", err);
                         err_handler_shutdown_signal.store(true, Ordering::SeqCst);
                     }
-                    println!("🕷️  Spider Manager thread started");
+                    info!("🕷️  Spider Manager thread started");
                 })
             };
 
@@ -138,16 +138,32 @@ impl Engine {
                 );
 
                 scope.spawn(move |_| {
-                    println!("💊 Health check thread started");
+                    info!("💊 Health check thread started");
                     let _ = health_check.start();
                 })
             };
 
-            println!("🚀 All threads spawned, engine running...");
+            // 6. Spawn Health Check & Stats Thread
+            let _monitor = {
+                let health_check = EngineMonitor::new(
+                    Arc::clone(&self.downloader),
+                    Arc::clone(&self.scheduler),
+                    Arc::clone(&self.shutdown_signal),
+                    Arc::clone(&self.last_activity),
+                    self.config.clone(),
+                );
+
+                scope.spawn(move |_| {
+                    info!("💊 Health check thread started");
+                    let _ = health_check.start_tui();
+                })
+            };
+
+            info!("🚀 All threads spawned, engine running...");
 
             // Wait for completion
             let _ = health_handle.join();
-            println!("🛑 Shutdown signal received, waiting for threads to finish...");
+            info!("🛑 Shutdown signal received, waiting for threads to finish...");
 
             Ok(())
         })
