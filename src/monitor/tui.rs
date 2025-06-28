@@ -63,6 +63,7 @@ impl TuiMonitor {
             let scheduler_empty = self.scheduler.lock().unwrap().is_empty();
             let idle_time = self.last_activity.lock().unwrap().elapsed();
             let shutdown_active = self.shutdown_signal.load(Ordering::Relaxed);
+            let shutdown_signal = self.shutdown_signal.clone();
 
             terminal.draw(|f| {
                 let chunks = Layout::default()
@@ -149,6 +150,7 @@ impl TuiMonitor {
             if event::poll(Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
                     if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
+                        shutdown_signal.swap(true, Ordering::Relaxed);
                         break;
                     }
                 }
