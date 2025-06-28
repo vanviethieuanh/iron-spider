@@ -927,6 +927,7 @@ name = "iron-spider"
 version = "0.1.0"
 dependencies = [
  "crossbeam",
+ "dashmap",
  "futures",
  "governor",
  "rayon",

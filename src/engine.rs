@@ -11,7 +11,7 @@ use tracing::{error, info};
 
 use crate::{
     config::EngineConfig,
-    downloader::Downloader,
+    downloader::downloader::Downloader,
     errors::EngineError,
     item::ResultItem,
     monitor::EngineMonitor,

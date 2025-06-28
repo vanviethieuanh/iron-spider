@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{config::EngineConfig, downloader::Downloader, scheduler::Scheduler};
+use crate::{config::EngineConfig, downloader::downloader::Downloader, scheduler::Scheduler};
 
 pub struct EngineMonitor {
     downloader: Arc<Downloader>,
@@ -47,6 +47,7 @@ impl EngineMonitor {
                     "📊 Active requests: {}, Scheduler empty: {}",
                     active, scheduler_empty
                 );
+                println!("{}", self.downloader.get_stats());
 
                 stats_timer = Instant::now();
             }

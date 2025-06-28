@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
+dashmap = "6.1.0"
 futures = "0.3.31"
 governor = { version = "0.10.0", features = ["no_std"] }
 rayon = "1.10.0"

@@ -12,30 +12,10 @@ use tokio::sync::Semaphore;
 use tracing::error;
 
 use crate::config::EngineConfig;
+use crate::downloader::stat::{DownloaderStats, StatsTracker};
 use crate::errors::EngineError;
 use crate::response::Response;
 use crate::scheduler::Scheduler;
-
-use std::fmt;
-
-#[derive(Debug, Clone)]
-pub struct DownloaderStats {
-    /// Number of requests currently being processed
-    pub active_requests: usize,
-
-    /// Number of requests currently waiting for semaphore
-    pub waiting_requests: usize,
-}
-
-impl fmt::Display for DownloaderStats {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Active: {}, Waiting: {}",
-            self.active_requests, self.waiting_requests
-        )
-    }
-}
 
 #[derive(Clone)]
 pub struct Downloader {
@@ -46,6 +26,7 @@ pub struct Downloader {
 
     active_requests: Arc<AtomicUsize>,
     waiting_requests: Arc<AtomicUsize>,
+    stats_tracker: Arc<StatsTracker>,
 }
 
 impl Downloader {
@@ -77,18 +58,12 @@ impl Downloader {
 
             active_requests: Arc::new(AtomicUsize::new(0)),
             waiting_requests: Arc::new(AtomicUsize::new(0)),
+            stats_tracker: Arc::new(StatsTracker::new()),
         })
     }
 
     pub fn get_stats(&self) -> DownloaderStats {
-        DownloaderStats {
-            active_requests: self
-                .active_requests
-                .load(std::sync::atomic::Ordering::Relaxed),
-            waiting_requests: self
-                .waiting_requests
-                .load(std::sync::atomic::Ordering::Relaxed),
-        }
+        self.stats_tracker.get_stats()
     }
 
     pub fn is_idle(&self) -> bool {
@@ -127,6 +102,7 @@ impl Downloader {
                         let waiting_requests = self.waiting_requests.clone();
                         let active_requests = self.active_requests.clone();
                         let limiter = self.limiter.clone();
+                        let stats_tracker = self.stats_tracker.clone();
 
                         // Perform HTTP request
                         join_set.spawn(async move {
@@ -140,12 +116,15 @@ impl Downloader {
 
                             let actual_request = iron_req.request.clone();
                             let request_url = actual_request.url.clone();
+
+                            let start_time = Instant::now();
                             let resp = client
                                 .request(actual_request.method, actual_request.url)
                                 .headers(actual_request.headers.unwrap_or_default())
                                 .body(actual_request.body.unwrap_or_default())
                                 .send()
                                 .await;
+                            let response_time = start_time.elapsed();
 
                             active_requests.fetch_sub(1, Ordering::Relaxed);
                             drop(_permit);
@@ -160,6 +139,7 @@ impl Downloader {
                                     let headers = r.headers().clone();
                                     let version = format!("{:?}", r.version()); // e.g., HTTP/1.1, H2
                                     let body = r.bytes().await.unwrap_or_default().to_vec();
+                                    let body_len = body.len();
 
                                     if is_status_accepted {
                                         let _ = resp_sender.send(Response {
@@ -173,24 +153,35 @@ impl Downloader {
                                     } else {
                                         error!("Status error [{}]: {}", status, url);
                                     }
+
+                                    stats_tracker.inc_response(
+                                        status,
+                                        body_len as u64,
+                                        response_time,
+                                    );
                                 }
                                 Err(e) => {
                                     if e.is_timeout() {
                                         error!("Timeout: {} -> {}", request_url, e);
+                                        stats_tracker.inc_exception("timeout");
                                     } else if e.is_connect() {
                                         error!(
                                             "Connection error (maybe server not started): {} -> {}",
                                             request_url, e
                                         );
+                                        stats_tracker.inc_exception("connect");
                                     } else if e.is_request() {
                                         error!("Bad request formation: {} -> {}", request_url, e);
+                                        stats_tracker.inc_exception("request");
                                     } else if e.is_body() {
                                         error!("Body error: {} -> {}", request_url, e);
+                                        stats_tracker.inc_exception("body");
                                     } else {
                                         error!(
                                             "Request failed (other): {} -> {:?}",
                                             request_url, e
                                         );
+                                        stats_tracker.inc_exception("unkown");
                                     }
                                 }
                             }
