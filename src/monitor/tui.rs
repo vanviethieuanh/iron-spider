@@ -174,9 +174,20 @@ fn format_status_codes(status_counts: &std::collections::HashMap<u16, u64>) -> S
         return "None".to_string();
     }
 
-    status_counts
+    let total: u64 = status_counts.values().sum();
+    let mut sorted_codes: Vec<_> = status_counts.iter().collect();
+    sorted_codes.sort_by_key(|(code, _)| *code);
+
+    sorted_codes
         .iter()
-        .map(|(code, count)| format!("  {}: {}", code, count))
+        .map(|(code, count)| {
+            let percentage = if total > 0 {
+                (**count as f64 / total as f64) * 100.0
+            } else {
+                0.0
+            };
+            format!("  {}: {} ({:.1}%)", code, count, percentage)
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }

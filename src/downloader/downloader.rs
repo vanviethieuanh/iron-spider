@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam::channel::Sender;
@@ -24,8 +24,6 @@ pub struct Downloader {
     http_error_allow_codes: HashSet<StatusCode>,
     download_sem: Arc<Semaphore>,
 
-    active_requests: Arc<AtomicUsize>,
-    waiting_requests: Arc<AtomicUsize>,
     stats_tracker: Arc<StatsTracker>,
 }
 
@@ -56,8 +54,6 @@ impl Downloader {
             http_error_allow_codes,
             download_sem: Arc::new(Semaphore::new(engine_config.concurrent_limit)),
 
-            active_requests: Arc::new(AtomicUsize::new(0)),
-            waiting_requests: Arc::new(AtomicUsize::new(0)),
             stats_tracker: Arc::new(StatsTracker::new()),
         })
     }
@@ -67,7 +63,7 @@ impl Downloader {
     }
 
     pub fn is_idle(&self) -> bool {
-        self.active_requests.load(Ordering::SeqCst) == 0
+        self.stats_tracker.is_idle()
     }
 
     // Start a async runtime for downlaoder
@@ -92,15 +88,13 @@ impl Downloader {
 
                 match request {
                     Some(iron_req) => {
-                        self.waiting_requests.fetch_add(1, Ordering::Relaxed);
+                        self.stats_tracker.inc_waiting();
                         *last_activity.lock().unwrap() = Instant::now();
 
                         let client = self.client.clone();
                         let resp_sender = resp_sender.clone();
                         let download_sem = self.download_sem.clone();
                         let http_error_allow_codes = self.http_error_allow_codes.clone();
-                        let waiting_requests = self.waiting_requests.clone();
-                        let active_requests = self.active_requests.clone();
                         let limiter = self.limiter.clone();
                         let stats_tracker = self.stats_tracker.clone();
 
@@ -111,8 +105,7 @@ impl Downloader {
                             }
                             let _permit = download_sem.acquire().await.unwrap();
 
-                            waiting_requests.fetch_sub(1, Ordering::Relaxed);
-                            active_requests.fetch_add(1, Ordering::Relaxed);
+                            stats_tracker.dec_waiting_inc_active();
 
                             let actual_request = iron_req.request.clone();
                             let request_url = actual_request.url.clone();
@@ -126,8 +119,8 @@ impl Downloader {
                                 .await;
                             let response_time = start_time.elapsed();
 
-                            active_requests.fetch_sub(1, Ordering::Relaxed);
                             drop(_permit);
+                            stats_tracker.dec_active();
 
                             match resp {
                                 Ok(r) => {

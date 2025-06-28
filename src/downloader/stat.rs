@@ -151,6 +151,10 @@ impl StatsTracker {
         }
     }
 
+    pub fn is_idle(&self) -> bool {
+        self.active_requests.load(Ordering::SeqCst) == 0
+    }
+
     pub fn inc_requests(&self) {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
     }
