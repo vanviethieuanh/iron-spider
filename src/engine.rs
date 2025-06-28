@@ -14,7 +14,7 @@ use crate::{
     downloader::downloader::Downloader,
     errors::EngineError,
     item::ResultItem,
-    monitor::EngineMonitor,
+    monitor::monitor::EngineMonitor,
     pipeline::manager::PipelineManager,
     response::Response,
     scheduler::Scheduler,
@@ -139,7 +139,7 @@ impl Engine {
 
                 scope.spawn(move |_| {
                     println!("💊 Health check thread started");
-                    health_check.start();
+                    let _ = health_check.start();
                 })
             };
 
