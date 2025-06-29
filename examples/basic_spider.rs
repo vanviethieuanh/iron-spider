@@ -16,7 +16,7 @@ use iron_spider::{
 use regex::Regex;
 use reqwest::Url;
 use scraper::{Html, Selector};
-use tracing::{Level, info};
+use tracing::info;
 
 #[derive(Debug)]
 pub struct ArticleItem {
@@ -152,10 +152,6 @@ impl Spider for ExampleSpider {
 }
 
 fn main() {
-    // tracing_subscriber::fmt()
-    //     .with_max_level(Level::INFO) // Or "debug" for more verbose logs
-    //     .init();
-
     let mut http_error_allow_codes = HashSet::new();
     http_error_allow_codes.insert(reqwest::StatusCode::NOT_FOUND);
 
@@ -168,7 +164,9 @@ fn main() {
 
     let scheduler = Box::new(SimpleScheduler::new());
     let example_spider = Arc::new(ExampleSpider::new());
-    let spiders: Vec<Arc<dyn Spider>> = vec![Arc::new((*example_spider).clone())];
+    let spiders: Vec<Arc<dyn Spider>> = (0..10)
+        .map(|_| Arc::new((*example_spider).clone()) as Arc<dyn Spider>)
+        .collect();
 
     let print_article_pipe = FnPipeline::new(|item: Option<ArticleItem>| {
         info!("Article item pipeline: {:?}", item);
