@@ -48,7 +48,6 @@ impl EngineMonitor {
             let active = self.downloader.get_stats().active_requests;
             let idle_time = self.last_activity.lock().unwrap().elapsed();
             let scheduler_empty = self.scheduler.lock().unwrap().is_empty();
-            let spider_stats = self.spider_manager.get_stats();
 
             if active == 0 && scheduler_empty && idle_time >= self.config.idle_timeout {
                 info!("⏰ All work completed, initiating shutdown...");

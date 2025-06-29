@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tracing::{debug, warn};
+use tracing::debug;
 
 pub struct SpiderManagerStats {
     pub dropped_responses: usize,
@@ -41,6 +41,7 @@ impl SpiderManagerStatsTracker {
     }
 
     pub(super) fn drop_one_response(&self) {
+        debug!("Dropping 1 spider");
         self.dropped_responses.fetch_add(1, Ordering::Relaxed);
     }
 
