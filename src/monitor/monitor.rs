@@ -40,7 +40,6 @@ impl EngineMonitor {
             std::thread::sleep(Duration::from_secs(1));
 
             let active = self.downloader.get_stats().active_requests;
-
             let idle_time = self.last_activity.lock().unwrap().elapsed();
             let scheduler_empty = self.scheduler.lock().unwrap().is_empty();
 
