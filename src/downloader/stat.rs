@@ -105,7 +105,7 @@ impl fmt::Display for DownloaderStats {
     }
 }
 
-pub struct StatsTracker {
+pub struct DownloaderStatsTracker {
     // Current state
     active_requests: Arc<AtomicUsize>,
     waiting_requests: Arc<AtomicUsize>,
@@ -138,7 +138,7 @@ pub struct StatsTracker {
     start_time: Arc<Instant>,
 }
 
-impl StatsTracker {
+impl DownloaderStatsTracker {
     pub fn new() -> Self {
         Self {
             active_requests: Arc::new(AtomicUsize::new(0)),

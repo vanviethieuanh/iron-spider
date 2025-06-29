@@ -12,7 +12,7 @@ use tokio::sync::Semaphore;
 use tracing::{error, info};
 
 use crate::config::EngineConfig;
-use crate::downloader::stat::{DownloaderStats, StatsTracker};
+use crate::downloader::stat::{DownloaderStats, DownloaderStatsTracker};
 use crate::errors::EngineError;
 use crate::response::Response;
 use crate::scheduler::Scheduler;
@@ -24,7 +24,7 @@ pub struct Downloader {
     http_error_allow_codes: HashSet<StatusCode>,
     download_sem: Arc<Semaphore>,
 
-    stats_tracker: Arc<StatsTracker>,
+    stats_tracker: Arc<DownloaderStatsTracker>,
 }
 
 impl Downloader {
@@ -54,7 +54,7 @@ impl Downloader {
             http_error_allow_codes,
             download_sem: Arc::new(Semaphore::new(engine_config.concurrent_limit)),
 
-            stats_tracker: Arc::new(StatsTracker::new()),
+            stats_tracker: Arc::new(DownloaderStatsTracker::new()),
         })
     }
 
