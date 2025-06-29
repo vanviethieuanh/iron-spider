@@ -2,6 +2,7 @@ use crate::{
     config::EngineConfig,
     downloader::{downloader::Downloader, tui::DownloaderWidget},
     scheduler::Scheduler,
+    spider::{manager::SpiderManager, tui::SpiderManagerWidget},
 };
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -29,6 +30,7 @@ pub struct TuiMonitor {
     scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
     shutdown_signal: Arc<AtomicBool>,
     last_activity: Arc<Mutex<Instant>>,
+    spider_manager: Arc<SpiderManager>,
     config: EngineConfig,
 }
 
@@ -36,6 +38,7 @@ impl TuiMonitor {
     pub fn new(
         downloader: Arc<Downloader>,
         scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
+        spider_manager: Arc<SpiderManager>,
         shutdown_signal: Arc<AtomicBool>,
         last_activity: Arc<Mutex<Instant>>,
         config: EngineConfig,
@@ -46,6 +49,7 @@ impl TuiMonitor {
             shutdown_signal,
             last_activity,
             config,
+            spider_manager,
         }
     }
 
@@ -68,11 +72,19 @@ impl TuiMonitor {
             terminal.draw(|f| {
                 let chunks = Layout::default()
                     .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .constraints([
+                        Constraint::Percentage(33),
+                        Constraint::Percentage(33),
+                        Constraint::Percentage(34),
+                    ])
                     .split(f.area());
 
                 let widget = DownloaderWidget::new(&stats);
                 f.render_widget(widget, chunks[0]);
+
+                let spider_stats = self.spider_manager.get_stats(); // assuming Arc<SpiderManagerStatsTracker>
+                let spider_widget = SpiderManagerWidget::new(&spider_stats);
+                f.render_widget(spider_widget, chunks[1]); // choose the appropriate `chunks[n]`
 
                 let scheduler_text = format!(
                     "Queue Empty: {}\n\
@@ -102,7 +114,7 @@ impl TuiMonitor {
                             .borders(Borders::ALL),
                     )
                     .style(Style::default().fg(scheduler_color));
-                f.render_widget(scheduler_paragraph, chunks[1]);
+                f.render_widget(scheduler_paragraph, chunks[2]);
             })?;
 
             // Handle input

@@ -22,10 +22,10 @@ use crate::{
 };
 
 pub struct Engine {
-    scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
     spider_manager: Arc<SpiderManager>,
     pipeline_manager: Arc<PipelineManager>,
     downloader: Arc<Downloader>,
+    scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
     monitor: Arc<EngineMonitor>,
 
     shutdown_signal: Arc<AtomicBool>,
@@ -54,6 +54,7 @@ impl Engine {
         let last_activity = Arc::new(Mutex::new(Instant::now()));
         let monitor = Arc::new(EngineMonitor::new(
             Arc::clone(&downloader),
+            Arc::clone(&spider_manager),
             Arc::clone(&scheduler),
             Arc::clone(&shutdown_signal),
             Arc::clone(&last_activity),

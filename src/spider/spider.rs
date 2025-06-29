@@ -23,7 +23,7 @@ impl SpiderState {
     }
 
     pub fn is_activated(&self) -> bool {
-        self.in_flight_requests.load(Ordering::SeqCst) > 0
+        self.in_flight_requests.load(Ordering::Relaxed) > 0
     }
 }
 

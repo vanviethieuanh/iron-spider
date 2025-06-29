@@ -3,7 +3,7 @@ use std::{
     fmt::Debug,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -17,7 +17,10 @@ use crate::{
     request::{IronRequest, Request},
     response::Response,
     scheduler::Scheduler,
-    spider::spider::{Spider, SpiderResult, SpiderState},
+    spider::{
+        spider::{Spider, SpiderResult, SpiderState},
+        stat::{SpiderManagerStats, SpiderManagerStatsTracker},
+    },
 };
 
 static SPIDER_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -55,20 +58,10 @@ impl RegisteredSpider {
     }
 }
 
-pub struct SpiderManagerStats {
-    pub dropped_responses: usize,
-    pub total_spiders: usize,
-    pub sleeping_spiders: usize,
-    pub active_spiders: usize,
-}
-
 pub struct SpiderManager {
     registered_spiders: Vec<RegisteredSpider>,
     id_map: HashMap<u64, usize>,
-
-    spider_counts: usize,
-    active_spiders: AtomicUsize,
-    dropped_responses: AtomicUsize,
+    stats_tracker: Arc<SpiderManagerStatsTracker>,
 }
 
 impl SpiderManager {
@@ -76,6 +69,7 @@ impl SpiderManager {
         let start_spider_count = spiders.len();
         let mut registered_spiders = Vec::with_capacity(spiders.len());
         let mut id_map = HashMap::with_capacity(spiders.len());
+        let stats_tracker = Arc::new(SpiderManagerStatsTracker::new(start_spider_count));
 
         for spider in spiders {
             let registered = RegisteredSpider::new(spider);
@@ -86,10 +80,7 @@ impl SpiderManager {
         Self {
             registered_spiders,
             id_map,
-
-            spider_counts: start_spider_count,
-            active_spiders: AtomicUsize::new(0),
-            dropped_responses: AtomicUsize::new(0),
+            stats_tracker,
         }
     }
 
@@ -106,7 +97,8 @@ impl SpiderManager {
                 );
             }
 
-            self.active_spiders.fetch_sub(1, Ordering::SeqCst);
+            self.stats_tracker.deactivate_one_spider();
+
             registered_spider.inner.close();
             info!(
                 "Spider '{} - {}' has closed.",
@@ -124,27 +116,19 @@ impl SpiderManager {
 
             state
                 .in_flight_requests
-                .fetch_add(num_requests, Ordering::SeqCst);
+                .fetch_add(num_requests, Ordering::Relaxed);
             state
                 .created_requests
                 .fetch_add(num_requests, Ordering::Relaxed);
 
-            if !state.is_activated() {
-                self.active_spiders.fetch_add(1, Ordering::SeqCst);
+            if state.is_activated() {
+                self.stats_tracker.activate_one_spider();
             }
         }
     }
 
     pub fn get_stats(&self) -> SpiderManagerStats {
-        let active = self.active_spiders.load(Ordering::Relaxed);
-        let dropped = self.dropped_responses.load(Ordering::Relaxed);
-
-        SpiderManagerStats {
-            dropped_responses: dropped,
-            total_spiders: self.spider_counts,
-            active_spiders: active,
-            sleeping_spiders: self.spider_counts - active,
-        }
+        self.stats_tracker.get_stats()
     }
 
     fn handle_requests_result(
@@ -227,7 +211,7 @@ impl SpiderManager {
                             self.handle_items_result(items, &item_sender);
                         }
                         SpiderResult::None => {
-                            // No action needed
+                            self.stats_tracker.drop_one_response();
                         }
                     }
 
