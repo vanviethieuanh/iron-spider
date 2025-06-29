@@ -1,8 +1,5 @@
 // tui_monitor.rs
-use crate::{
-    config::EngineConfig, downloader::downloader::Downloader, monitor::monitor::EngineMonitor,
-    scheduler::Scheduler,
-};
+use crate::{config::EngineConfig, downloader::downloader::Downloader, scheduler::Scheduler};
 use crossterm::{
     event::{self, Event, KeyCode},
     execute,
@@ -192,18 +189,4 @@ fn format_status_codes(status_counts: &std::collections::HashMap<u16, u64>) -> S
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-// Simple usage
-impl EngineMonitor {
-    pub fn start_tui(self) -> Result<(), Box<dyn std::error::Error>> {
-        let tui_monitor = TuiMonitor::new(
-            self.downloader,
-            self.scheduler,
-            self.shutdown_signal,
-            self.last_activity,
-            self.config,
-        );
-        tui_monitor.run()
-    }
 }

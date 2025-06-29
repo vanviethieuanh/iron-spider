@@ -26,16 +26,15 @@ pub struct Engine {
     spider_manager: Arc<SpiderManager>,
     pipeline_manager: Arc<PipelineManager>,
     downloader: Arc<Downloader>,
+    monitor: Arc<EngineMonitor>,
 
     shutdown_signal: Arc<AtomicBool>,
     last_activity: Arc<Mutex<Instant>>,
-
-    config: EngineConfig,
 }
 
 impl Engine {
     pub fn new(
-        scheduler: Box<dyn Scheduler + Send + Sync>,
+        scheduler: Box<dyn Scheduler>,
         spiders: Vec<Arc<dyn Spider>>,
         pipelines: PipelineManager,
         config: Option<EngineConfig>,
@@ -49,17 +48,27 @@ impl Engine {
                 panic!();
             }
         };
-
         let spider_manager = Arc::new(SpiderManager::new(spiders));
+        let scheduler = Arc::new(Mutex::new(scheduler));
+        let shutdown_signal = Arc::new(AtomicBool::new(false));
+        let last_activity = Arc::new(Mutex::new(Instant::now()));
+        let monitor = Arc::new(EngineMonitor::new(
+            Arc::clone(&downloader),
+            Arc::clone(&scheduler),
+            Arc::clone(&shutdown_signal),
+            Arc::clone(&last_activity),
+            config.clone(),
+        ));
+        let pipeline_manager = Arc::new(pipelines);
 
         Self {
-            scheduler: Arc::new(Mutex::new(scheduler)),
+            scheduler,
             spider_manager,
-            pipeline_manager: Arc::new(pipelines),
-            config,
+            pipeline_manager,
             downloader,
-            shutdown_signal: Arc::new(AtomicBool::new(false)),
-            last_activity: Arc::new(Mutex::new(Instant::now())),
+            shutdown_signal,
+            last_activity,
+            monitor,
         }
     }
 
@@ -129,33 +138,21 @@ impl Engine {
 
             // 5. Spawn Health Check & Stats Thread
             let health_handle = {
-                let health_check = EngineMonitor::new(
-                    Arc::clone(&self.downloader),
-                    Arc::clone(&self.scheduler),
-                    Arc::clone(&self.shutdown_signal),
-                    Arc::clone(&self.last_activity),
-                    self.config.clone(),
-                );
+                let monitor = Arc::clone(&self.monitor);
 
                 scope.spawn(move |_| {
                     info!("💊 Health check thread started");
-                    let _ = health_check.start();
+                    let _ = monitor.start();
                 })
             };
 
             // 6. Spawn Health Check & Stats Thread
             let _monitor = {
-                let health_check = EngineMonitor::new(
-                    Arc::clone(&self.downloader),
-                    Arc::clone(&self.scheduler),
-                    Arc::clone(&self.shutdown_signal),
-                    Arc::clone(&self.last_activity),
-                    self.config.clone(),
-                );
+                let monitor = Arc::clone(&self.monitor);
 
                 scope.spawn(move |_| {
                     info!("💊 Health check thread started");
-                    let _ = health_check.start_tui();
+                    let _ = monitor.start_tui();
                 })
             };
 

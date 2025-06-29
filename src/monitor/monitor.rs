@@ -8,7 +8,10 @@ use std::{
 
 use tracing::info;
 
-use crate::{config::EngineConfig, downloader::downloader::Downloader, scheduler::Scheduler};
+use crate::{
+    config::EngineConfig, downloader::downloader::Downloader, monitor::tui::TuiMonitor,
+    scheduler::Scheduler,
+};
 
 pub struct EngineMonitor {
     pub downloader: Arc<Downloader>,
@@ -35,7 +38,7 @@ impl EngineMonitor {
         }
     }
 
-    pub fn start(self) {
+    pub fn start(&self) {
         loop {
             std::thread::sleep(Duration::from_secs(1));
 
@@ -54,5 +57,22 @@ impl EngineMonitor {
             }
         }
         info!("💊 Health check thread stopped");
+    }
+
+    pub fn start_tui(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let downloader = Arc::clone(&self.downloader);
+        let scheduler = Arc::clone(&self.scheduler);
+        let shutdown_signal = Arc::clone(&self.shutdown_signal);
+        let last_activity = Arc::clone(&self.last_activity);
+        let config = self.config.clone();
+
+        let tui_monitor = TuiMonitor::new(
+            downloader,
+            scheduler,
+            shutdown_signal,
+            last_activity,
+            config,
+        );
+        tui_monitor.run()
     }
 }
