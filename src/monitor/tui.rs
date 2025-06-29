@@ -84,7 +84,9 @@ impl TuiMonitor {
                     \n\
                     Rate Limited: {}\n\
                     Request Bytes: {}\n\
-                    Response Bytes: {}",
+                    Response Bytes: {}\n\
+                    \n\
+                    Request Rate: {:.2}(r/s)",
                     stats.active_requests,
                     stats.waiting_requests,
                     stats.peak_concurrent_requests,
@@ -96,7 +98,8 @@ impl TuiMonitor {
                     stats.max_response_time_ms,
                     stats.rate_limited_count,
                     stats.total_request_bytes,
-                    stats.total_response_bytes
+                    stats.total_response_bytes,
+                    stats.request_rate_s
                 );
 
                 let downloader_paragraph = Paragraph::new(downloader_text)
@@ -115,15 +118,12 @@ impl TuiMonitor {
                     Idle Time: {:.1}s\n\
                     Idle Timeout: {:.1}s\n\
                     \n\
-                    Stats Interval: {:.1}s\n\
-                    \n\
                     Shutdown Signal: {}\n\
                     \n\
                     Status Codes:\n{}",
                     scheduler_empty,
                     idle_time.as_secs_f64(),
                     self.config.idle_timeout.as_secs_f64(),
-                    self.config.stats_interval.as_secs_f64(),
                     shutdown_active,
                     format_status_codes(&stats.status_counts)
                 );
@@ -136,7 +136,10 @@ impl TuiMonitor {
                 let scheduler_paragraph = Paragraph::new(scheduler_text)
                     .block(
                         Block::default()
-                            .title("Scheduler & System")
+                            .title(format!(
+                                "Scheduler & System - Interval {} second(s)",
+                                self.config.stats_interval.as_secs_f64()
+                            ))
                             .borders(Borders::ALL),
                     )
                     .style(Style::default().fg(scheduler_color));

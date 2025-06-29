@@ -14,6 +14,39 @@ pub struct Request {
     pub meta: Option<HashMap<String, String>>,
 }
 
+impl Request {
+    pub fn size(&self) -> u64 {
+        let mut total = 0u64;
+
+        // === Request line: "METHOD /path HTTP/1.1\r\n" ===
+        let method = self.method.as_str();
+        let path = self.url.path(); // does not include domain
+        total += method.len() as u64 + 1; // + space
+        total += path.len() as u64 + 1; // + space
+        total += "HTTP/1.1\r\n".len() as u64;
+
+        // === Headers ===
+        if let Some(headers) = &self.headers {
+            for (key, value) in headers.iter() {
+                total += key.as_str().len() as u64;
+                total += 2; // ": "
+                total += value.as_bytes().len() as u64;
+                total += 2; // "\r\n"
+            }
+        }
+
+        // === End of headers ===
+        total += 2; // "\r\n"
+
+        // === Body ===
+        if let Some(body) = &self.body {
+            total += body.as_bytes().len() as u64;
+        }
+
+        total
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct IronRequest {
     pub registered_spider: Arc<RegisteredSpider>,

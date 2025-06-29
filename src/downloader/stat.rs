@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct DownloaderStats {
@@ -35,6 +35,9 @@ pub struct DownloaderStats {
 
     // Rate limiting
     pub rate_limited_count: u64,
+
+    // Rates
+    pub request_rate_s: f64,
 }
 
 impl Default for DownloaderStats {
@@ -54,6 +57,7 @@ impl Default for DownloaderStats {
             min_response_time_ms: f64::MAX,
             max_response_time_ms: 0.0,
             rate_limited_count: 0,
+            request_rate_s: 0.0,
         }
     }
 }
@@ -105,7 +109,7 @@ pub struct StatsTracker {
     // Current state
     active_requests: Arc<AtomicUsize>,
     waiting_requests: Arc<AtomicUsize>,
-    peak_concurrent_requests: Arc<AtomicUsize>,
+    peak_queued_requests: Arc<AtomicUsize>,
 
     // Totals
     total_requests: Arc<AtomicU64>,
@@ -129,6 +133,9 @@ pub struct StatsTracker {
 
     // Rate limiting
     rate_limited_count: Arc<AtomicU64>,
+
+    // Start time
+    start_time: Arc<Instant>,
 }
 
 impl StatsTracker {
@@ -136,7 +143,7 @@ impl StatsTracker {
         Self {
             active_requests: Arc::new(AtomicUsize::new(0)),
             waiting_requests: Arc::new(AtomicUsize::new(0)),
-            peak_concurrent_requests: Arc::new(AtomicUsize::new(0)),
+            peak_queued_requests: Arc::new(AtomicUsize::new(0)),
             total_requests: Arc::new(AtomicU64::new(0)),
             total_responses: Arc::new(AtomicU64::new(0)),
             total_exceptions: Arc::new(AtomicU64::new(0)),
@@ -148,6 +155,7 @@ impl StatsTracker {
             min_response_time_ms: Arc::new(AtomicU64::new(u64::MAX)),
             max_response_time_ms: Arc::new(AtomicU64::new(0)),
             rate_limited_count: Arc::new(AtomicU64::new(0)),
+            start_time: Arc::new(Instant::now()),
         }
     }
 
@@ -155,19 +163,20 @@ impl StatsTracker {
         self.active_requests.load(Ordering::SeqCst) == 0
     }
 
-    pub fn inc_requests(&self) {
+    pub fn inc_requests(&self, size: u64) {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
+        self.total_request_bytes.fetch_add(size, Ordering::Relaxed);
     }
 
     pub fn inc_waiting(&self) {
         let current = self.waiting_requests.fetch_add(1, Ordering::Relaxed) + 1;
-        self.update_peak_concurrent(current + self.active_requests.load(Ordering::Relaxed));
+        self.update_peak_queued(current + self.active_requests.load(Ordering::Relaxed));
     }
 
     pub fn dec_waiting_inc_active(&self) {
         self.waiting_requests.fetch_sub(1, Ordering::Relaxed);
         let current = self.active_requests.fetch_add(1, Ordering::Relaxed) + 1;
-        self.update_peak_concurrent(current + self.waiting_requests.load(Ordering::Relaxed));
+        self.update_peak_queued(current + self.waiting_requests.load(Ordering::Relaxed));
     }
 
     pub fn dec_active(&self) {
@@ -245,10 +254,10 @@ impl StatsTracker {
             .collect()
     }
 
-    fn update_peak_concurrent(&self, current_total: usize) {
-        let mut peak = self.peak_concurrent_requests.load(Ordering::Relaxed);
+    fn update_peak_queued(&self, current_total: usize) {
+        let mut peak = self.peak_queued_requests.load(Ordering::Relaxed);
         while current_total > peak {
-            match self.peak_concurrent_requests.compare_exchange_weak(
+            match self.peak_queued_requests.compare_exchange_weak(
                 peak,
                 current_total,
                 Ordering::Relaxed,
@@ -316,10 +325,12 @@ impl StatsTracker {
             }
         }
 
+        let total_requests = self.total_requests.load(Ordering::Relaxed);
+
         DownloaderStats {
             active_requests: self.active_requests.load(Ordering::Relaxed),
             waiting_requests: self.waiting_requests.load(Ordering::Relaxed),
-            peak_concurrent_requests: self.peak_concurrent_requests.load(Ordering::Relaxed),
+            peak_concurrent_requests: self.peak_queued_requests.load(Ordering::Relaxed),
             total_requests: self.total_requests.load(Ordering::Relaxed),
             total_responses,
             total_exceptions: self.total_exceptions.load(Ordering::Relaxed),
@@ -339,6 +350,7 @@ impl StatsTracker {
             },
             max_response_time_ms: max_time as f64,
             rate_limited_count: self.rate_limited_count.load(Ordering::Relaxed),
+            request_rate_s: (total_requests as f64) / self.start_time.elapsed().as_secs_f64(),
         }
     }
 }

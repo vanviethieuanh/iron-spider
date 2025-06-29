@@ -110,6 +110,7 @@ impl Downloader {
                             let actual_request = iron_req.request.clone();
                             let request_url = actual_request.url.clone();
 
+                            stats_tracker.inc_requests(actual_request.size());
                             let start_time = Instant::now();
                             let resp = client
                                 .request(actual_request.method, actual_request.url)
