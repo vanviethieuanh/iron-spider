@@ -10,7 +10,7 @@ use iron_spider::{
     pipeline::{fn_pipeline::FnPipeline, manager::PipelineManager},
     request::{Request, RequestBuilder},
     response::Response,
-    scheduler::SimpleScheduler,
+    scheduler::scheduler::SimpleScheduler,
     spider::spider::{Spider, SpiderResult},
 };
 use regex::Regex;
@@ -164,7 +164,7 @@ fn main() {
 
     let scheduler = Box::new(SimpleScheduler::new());
     let example_spider = Arc::new(ExampleSpider::new());
-    let spiders: Vec<Arc<dyn Spider>> = (0..10)
+    let spiders: Vec<Arc<dyn Spider>> = (0..1000)
         .map(|_| Arc::new((*example_spider).clone()) as Arc<dyn Spider>)
         .collect();
 

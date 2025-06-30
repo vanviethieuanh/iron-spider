@@ -17,7 +17,7 @@ use crate::{
     monitor::monitor::EngineMonitor,
     pipeline::manager::PipelineManager,
     response::Response,
-    scheduler::Scheduler,
+    scheduler::scheduler::Scheduler,
     spider::{manager::SpiderManager, spider::Spider},
 };
 

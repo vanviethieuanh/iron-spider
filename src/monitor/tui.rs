@@ -1,7 +1,7 @@
 use crate::{
     config::EngineConfig,
     downloader::{downloader::Downloader, tui::DownloaderWidget},
-    scheduler::Scheduler,
+    scheduler::scheduler::Scheduler,
     spider::{manager::SpiderManager, tui::SpiderManagerWidget},
 };
 use crossterm::{
@@ -65,6 +65,7 @@ impl TuiMonitor {
             // Get current stats
             let stats = self.downloader.get_stats();
             let scheduler_empty = self.scheduler.lock().unwrap().is_empty();
+            let scheduler_counter = self.scheduler.lock().unwrap().count();
             let idle_time = self.last_activity.lock().unwrap().elapsed();
             let shutdown_active = self.shutdown_signal.load(Ordering::Relaxed);
             let shutdown_signal = self.shutdown_signal.clone();
@@ -88,12 +89,14 @@ impl TuiMonitor {
 
                 let scheduler_text = format!(
                     "Queue Empty: {}\n\
+                    Queue Items: {}\n\
                     \n\
                     Idle Time: {:.1}s\n\
                     Idle Timeout: {:.1}s\n\
                     \n\
                     Shutdown Signal: {}",
                     scheduler_empty,
+                    scheduler_counter,
                     idle_time.as_secs_f64(),
                     self.config.idle_timeout.as_secs_f64(),
                     shutdown_active,

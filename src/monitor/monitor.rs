@@ -10,7 +10,7 @@ use tracing::info;
 
 use crate::{
     config::EngineConfig, downloader::downloader::Downloader, monitor::tui::TuiMonitor,
-    scheduler::Scheduler, spider::manager::SpiderManager,
+    scheduler::scheduler::Scheduler, spider::manager::SpiderManager,
 };
 
 pub struct EngineMonitor {

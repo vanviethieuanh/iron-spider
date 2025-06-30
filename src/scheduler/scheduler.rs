@@ -6,6 +6,7 @@ pub trait Scheduler: Send + Sync {
     fn dequeue(&mut self) -> Option<IronRequest>;
     fn is_empty(&self) -> bool;
     fn enqueue(&mut self, request: IronRequest) -> Result<(), SchedulerError>;
+    fn count(&self) -> u64;
 
     // Optional: non-blocking dequeue for better performance
     fn try_dequeue(&mut self) -> Result<IronRequest, TryRecvError> {
@@ -58,5 +59,11 @@ impl Scheduler for SimpleScheduler {
         self.sender
             .send(request)
             .map_err(|_| SchedulerError::ChannelClosed)
+    }
+
+    /// Returns the approximate number of waiting requests in the scheduler.
+    /// This may be slightly off due to concurrent operations.
+    fn count(&self) -> u64 {
+        self.receiver.len() as u64
     }
 }

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt::Debug,
     sync::{
         Arc,
@@ -16,7 +16,7 @@ use crate::{
     item::ResultItem,
     request::{IronRequest, Request},
     response::Response,
-    scheduler::Scheduler,
+    scheduler::scheduler::Scheduler,
     spider::{
         spider::{Spider, SpiderResult, SpiderState},
         stat::{SpiderManagerStats, SpiderManagerStatsTracker},

@@ -159,6 +159,10 @@ impl DownloaderStatsTracker {
         }
     }
 
+    pub fn get_waiting(&self) -> usize {
+        self.waiting_requests.load(Ordering::Relaxed)
+    }
+
     pub fn is_idle(&self) -> bool {
         self.active_requests.load(Ordering::SeqCst) == 0
     }

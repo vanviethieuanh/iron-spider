@@ -15,7 +15,7 @@ use crate::config::EngineConfig;
 use crate::downloader::stat::{DownloaderStats, DownloaderStatsTracker};
 use crate::errors::EngineError;
 use crate::response::Response;
-use crate::scheduler::Scheduler;
+use crate::scheduler::scheduler::Scheduler;
 
 #[derive(Clone)]
 pub struct Downloader {
@@ -80,6 +80,11 @@ impl Downloader {
             let mut join_set = tokio::task::JoinSet::new();
 
             while !shutdown_signal.load(Ordering::Relaxed) {
+                if self.stats_tracker.get_waiting() > 10 {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    continue;
+                }
+
                 // Pull request from scheduler
                 let request = {
                     let mut sched = scheduler.lock().unwrap();
