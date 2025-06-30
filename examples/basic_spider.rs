@@ -91,7 +91,7 @@ impl ExampleSpider {
 
 impl Spider for ExampleSpider {
     fn start_requests(&self) -> Vec<Request> {
-        (1..10)
+        (0..30)
             .map(|_| {
                 let url = format!("http://127.0.0.1:5000/article/{}", 3)
                     .parse::<Url>()
@@ -164,7 +164,7 @@ fn main() {
 
     let scheduler = Box::new(SimpleScheduler::new());
     let example_spider = Arc::new(ExampleSpider::new());
-    let spiders: Vec<Arc<dyn Spider>> = (0..1000)
+    let spiders: Vec<Arc<dyn Spider>> = (0..100)
         .map(|_| Arc::new((*example_spider).clone()) as Arc<dyn Spider>)
         .collect();
 

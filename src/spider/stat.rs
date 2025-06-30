@@ -5,7 +5,8 @@ use tracing::debug;
 pub struct SpiderManagerStats {
     pub dropped_responses: usize,
     pub total_spiders: usize,
-    pub sleeping_spiders: usize,
+    pub pending_spiders: usize,
+    pub closed_spiders: usize,
     pub active_spiders: usize,
 }
 
@@ -45,15 +46,16 @@ impl SpiderManagerStatsTracker {
         self.dropped_responses.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(super) fn get_stats(&self) -> SpiderManagerStats {
+    pub(super) fn get_stats(&self, pending_spider_count: usize) -> SpiderManagerStats {
         let active = self.active_spiders.load(Ordering::Relaxed);
         let dropped = self.dropped_responses.load(Ordering::Relaxed);
 
         SpiderManagerStats {
+            pending_spiders: pending_spider_count,
             dropped_responses: dropped,
             total_spiders: self.spider_counts,
             active_spiders: active,
-            sleeping_spiders: self.spider_counts - active,
+            closed_spiders: self.spider_counts - pending_spider_count - active,
         }
     }
 }

@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -59,6 +59,7 @@ impl RegisteredSpider {
 }
 
 pub struct SpiderManager {
+    pending_spiders: Mutex<VecDeque<u64>>,
     registered_spiders: Vec<RegisteredSpider>,
     id_map: HashMap<u64, usize>,
     stats_tracker: Arc<SpiderManagerStatsTracker>,
@@ -71,13 +72,18 @@ impl SpiderManager {
         let mut id_map = HashMap::with_capacity(spiders.len());
         let stats_tracker = Arc::new(SpiderManagerStatsTracker::new(start_spider_count));
 
+        let mut pending_spiders = VecDeque::new();
         for spider in spiders {
             let registered = RegisteredSpider::new(spider);
-            id_map.insert(registered.id(), registered_spiders.len());
+            let registered_id = registered.id();
+
+            id_map.insert(registered_id, registered_spiders.len());
             registered_spiders.push(registered);
+            pending_spiders.push_back(registered_id);
         }
 
         Self {
+            pending_spiders: Mutex::new(pending_spiders),
             registered_spiders,
             id_map,
             stats_tracker,
@@ -110,7 +116,7 @@ impl SpiderManager {
         }
     }
 
-    fn activate_spider(&self, spider_id: u64, num_requests: usize) {
+    fn activate_spider(&self, spider_id: &u64, num_requests: usize) {
         if let Some(&index) = self.id_map.get(&spider_id) {
             let state = &self.registered_spiders[index].state;
 
@@ -128,7 +134,8 @@ impl SpiderManager {
     }
 
     pub fn get_stats(&self) -> SpiderManagerStats {
-        self.stats_tracker.get_stats()
+        self.stats_tracker
+            .get_stats(self.pending_spiders.lock().unwrap().len())
     }
 
     fn handle_requests_result(
@@ -179,9 +186,9 @@ impl SpiderManager {
         shutdown_signal: Arc<AtomicBool>,
         last_activity: Arc<std::sync::Mutex<Instant>>,
     ) -> Result<(), EngineError> {
-        self.seed_initial_requests(scheduler.clone())?;
-
         while !shutdown_signal.load(Ordering::Relaxed) {
+            let _ = self.try_activate_pending_spider(&scheduler);
+
             match resp_receiver.try_recv() {
                 Ok(response) => {
                     *last_activity.lock().unwrap() = Instant::now();
@@ -229,41 +236,49 @@ impl SpiderManager {
         Ok(())
     }
 
-    fn seed_initial_requests(
+    fn try_activate_pending_spider(
         &self,
-        scheduler: Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
+        scheduler: &Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
     ) -> Result<(), EngineError> {
-        info!("🌱 Seeding initial requests to scheduler...");
-
         let mut sched = scheduler.lock().unwrap();
-        let mut start_requests_count = 0;
-
-        // Get start requests from each spider
-        for registered_spiders in &self.registered_spiders {
-            let spider = registered_spiders.inner();
-            let start_requests = spider.start_requests();
-
-            let created_requests = start_requests.len();
-            let is_active = created_requests > 0;
-
-            for request in start_requests {
-                sched
-                    .enqueue(registered_spiders.make_request(request))
-                    .map_err(|e| {
-                        EngineError::InitializationError(format!(
-                            "Failed to seed request(s) of spider #{}, error: {:?}",
-                            registered_spiders.id, e
-                        ))
-                    })?;
-                start_requests_count += 1;
-            }
-
-            if is_active {
-                self.activate_spider(registered_spiders.id, created_requests);
-            }
+        let pending_request_count = sched.count();
+        if pending_request_count > 16 {
+            return Ok(());
         }
 
-        info!("🌱 Seeded {} initial requests", start_requests_count);
+        let registered_spider_id = {
+            let mut pending_spiders = self.pending_spiders.lock().unwrap();
+            match pending_spiders.pop_front() {
+                Some(spider) => spider,
+                None => return Ok(()),
+            }
+        };
+
+        let idx = self.id_map[&registered_spider_id];
+        let registered_spider = &self.registered_spiders[idx];
+
+        let start_requests = registered_spider.inner.start_requests();
+        let start_requests_count = start_requests.len();
+        let is_active = start_requests_count > 0;
+
+        for request in start_requests {
+            let idx = self.id_map[&registered_spider_id];
+            let registered = &self.registered_spiders[idx];
+
+            sched
+                .enqueue(registered.make_request(request))
+                .map_err(|e| {
+                    EngineError::InitializationError(format!(
+                        "Failed to seed request(s) of spider #{}, error: {:?}",
+                        &registered_spider_id, e
+                    ))
+                })?;
+        }
+
+        if is_active {
+            self.activate_spider(&registered_spider_id, start_requests_count);
+        }
+
         Ok(())
     }
 }

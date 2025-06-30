@@ -81,11 +81,11 @@ impl TuiMonitor {
                     .split(f.area());
 
                 let widget = DownloaderWidget::new(&stats);
-                f.render_widget(widget, chunks[0]);
+                f.render_widget(widget, chunks[2]);
 
                 let spider_stats = self.spider_manager.get_stats(); // assuming Arc<SpiderManagerStatsTracker>
                 let spider_widget = SpiderManagerWidget::new(&spider_stats);
-                f.render_widget(spider_widget, chunks[1]); // choose the appropriate `chunks[n]`
+                f.render_widget(spider_widget, chunks[0]); // choose the appropriate `chunks[n]`
 
                 let scheduler_text = format!(
                     "Queue Empty: {}\n\
@@ -117,7 +117,7 @@ impl TuiMonitor {
                             .borders(Borders::ALL),
                     )
                     .style(Style::default().fg(scheduler_color));
-                f.render_widget(scheduler_paragraph, chunks[2]);
+                f.render_widget(scheduler_paragraph, chunks[1]);
             })?;
 
             // Handle input
