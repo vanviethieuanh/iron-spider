@@ -25,6 +25,10 @@ use crate::{
 
 static SPIDER_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+// When Scheuduler hold more than this amount,
+// Spider Manager will stop activate new spider.
+static SCHEDULER_HOLDING_THRESOLD: u64 = 50;
+
 #[derive(Debug, Clone)]
 pub struct RegisteredSpider {
     id: u64,
@@ -242,7 +246,7 @@ impl SpiderManager {
     ) -> Result<(), EngineError> {
         let mut sched = scheduler.lock().unwrap();
         let pending_request_count = sched.count();
-        if pending_request_count > 16 {
+        if pending_request_count > SCHEDULER_HOLDING_THRESOLD {
             return Ok(());
         }
 

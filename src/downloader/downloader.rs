@@ -17,6 +17,8 @@ use crate::errors::EngineError;
 use crate::response::Response;
 use crate::scheduler::scheduler::Scheduler;
 
+static WAITING_FACTOR: usize = 2;
+
 #[derive(Clone)]
 pub struct Downloader {
     client: reqwest::Client,
@@ -25,6 +27,9 @@ pub struct Downloader {
     download_sem: Arc<Semaphore>,
 
     stats_tracker: Arc<DownloaderStatsTracker>,
+
+    // Max waiting request this downloader will hold on tokio runtime.
+    max_waiting: usize,
 }
 
 impl Downloader {
@@ -47,6 +52,7 @@ impl Downloader {
                 e
             ))
         })?;
+        let max_waiting = engine_config.concurrent_limit * WAITING_FACTOR;
 
         Ok(Self {
             client,
@@ -55,6 +61,7 @@ impl Downloader {
             download_sem: Arc::new(Semaphore::new(engine_config.concurrent_limit)),
 
             stats_tracker: Arc::new(DownloaderStatsTracker::new()),
+            max_waiting,
         })
     }
 
@@ -80,7 +87,7 @@ impl Downloader {
             let mut join_set = tokio::task::JoinSet::new();
 
             while !shutdown_signal.load(Ordering::Relaxed) {
-                if self.stats_tracker.get_waiting() > 10 {
+                if self.stats_tracker.get_waiting() >= self.max_waiting {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                     continue;
                 }
