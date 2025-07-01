@@ -9,3 +9,4 @@ pub mod request;
 pub mod response;
 pub mod scheduler;
 pub mod spider;
+pub(crate) mod utils;

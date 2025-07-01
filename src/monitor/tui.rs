@@ -65,7 +65,6 @@ impl TuiMonitor {
 
         tui_logger::init_logger(self.config.tui_logger_level)
             .expect("failed to initialize tui_logger");
-
         tracing_subscriber::registry()
             .with(tui_logger::TuiTracingSubscriberLayer)
             .init();
@@ -91,9 +90,10 @@ impl TuiMonitor {
                 let top_chunks = Layout::default()
                     .direction(Direction::Horizontal)
                     .constraints([
-                        Constraint::Percentage(33),
-                        Constraint::Percentage(33),
-                        Constraint::Percentage(34),
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
                     ])
                     .split(vertical_chunks[0]);
 

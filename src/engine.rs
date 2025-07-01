@@ -7,7 +7,7 @@ use std::{
 };
 
 use crossbeam::channel::unbounded;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{
     config::EngineConfig,
@@ -19,6 +19,7 @@ use crate::{
     response::Response,
     scheduler::scheduler::Scheduler,
     spider::{manager::SpiderManager, spider::Spider},
+    utils::human_duration,
 };
 
 pub struct Engine {
@@ -30,6 +31,7 @@ pub struct Engine {
 
     shutdown_signal: Arc<AtomicBool>,
     last_activity: Arc<Mutex<Instant>>,
+    start_time: Instant,
 }
 
 impl Engine {
@@ -61,6 +63,7 @@ impl Engine {
             config.clone(),
         ));
         let pipeline_manager = Arc::new(pipelines);
+        let start_time = Instant::now();
 
         Self {
             scheduler,
@@ -70,10 +73,13 @@ impl Engine {
             shutdown_signal,
             last_activity,
             monitor,
+            start_time,
         }
     }
 
     pub fn start(&mut self) -> Result<(), EngineError> {
+        self.start_time = Instant::now();
+
         let spider_stats = self.spider_manager.get_stats();
         info!(
             "🕷️ Starting Iron-Spider Engine {} spiders",
@@ -86,9 +92,11 @@ impl Engine {
 
         // Use crossbeam::scope for structured concurrency
         crossbeam::scope(|scope| {
+            let mut handles = vec![];
+
             // 1. Spawn Spider Manager thread
             // Spider Manager pushes requests to scheduler
-            let _spider_handle = {
+            handles.push(scope.spawn({
                 let scheduler = Arc::clone(&self.scheduler);
                 let resp_receiver = resp_receiver.clone();
                 let item_sender = item_sender.clone();
@@ -98,7 +106,8 @@ impl Engine {
 
                 let spider_manager = self.spider_manager.clone();
 
-                scope.spawn(move |_| {
+                move |_| {
+                    debug!(" Spider Manager thread is starting");
                     if let Err(err) = spider_manager.start(
                         scheduler,
                         resp_receiver,
@@ -109,13 +118,12 @@ impl Engine {
                         error!("❌ SpiderManager crashed: {}", err);
                         err_handler_shutdown_signal.store(true, Ordering::SeqCst);
                     }
-                    info!("🕷️  Spider Manager thread started");
-                })
-            };
+                }
+            }));
 
             // 2. Spawn Downloader thread
             // Downloader pulls requests directly from scheduler
-            let _downloader_handle = {
+            handles.push(scope.spawn({
                 let downloader = self.downloader.clone();
 
                 let scheduler = Arc::clone(&self.scheduler);
@@ -123,48 +131,65 @@ impl Engine {
                 let shutdown_signal = Arc::clone(&self.shutdown_signal);
                 let last_activity = Arc::clone(&self.last_activity);
 
-                scope.spawn(move |_| {
-                    downloader.start(scheduler, resp_sender, shutdown_signal, last_activity)
-                })
-            };
+                debug!("Downloader thread is starting");
+                move |_| downloader.start(scheduler, resp_sender, shutdown_signal, last_activity)
+            }));
 
             // 3. Pipeline Manager thread
-            let _pipeline_handle = {
+            handles.push(scope.spawn({
                 let item_receiver = item_receiver.clone();
                 let shutdown_signal = Arc::clone(&self.shutdown_signal);
                 let pipeline_manager = Arc::clone(&self.pipeline_manager);
 
-                scope.spawn(move |_| pipeline_manager.start(item_receiver, shutdown_signal))
-            };
+                debug!("Pipeline Manager thread is starting");
+                move |_| pipeline_manager.start(item_receiver, shutdown_signal)
+            }));
 
             // 5. Spawn Health Check & Stats Thread
-            let health_handle = {
+            handles.push(scope.spawn({
                 let monitor = Arc::clone(&self.monitor);
-
-                scope.spawn(move |_| {
-                    info!("💊 Health check thread started");
+                move |_| {
+                    debug!("Health-check thread is starting");
                     let _ = monitor.start();
-                })
-            };
+                }
+            }));
 
             // 6. Spawn Health Check & Stats Thread
-            let _monitor = {
+            handles.push(scope.spawn({
                 let monitor = Arc::clone(&self.monitor);
 
-                scope.spawn(move |_| {
-                    info!("💊 Health check thread started");
+                move |_| {
+                    debug!("TUI thread is starting");
                     let _ = monitor.start_tui();
-                })
-            };
+                }
+            }));
 
             info!("🚀 All threads spawned, engine running...");
 
-            // Wait for completion
-            let _ = health_handle.join();
+            // Wait for all threads
+            for h in handles {
+                let _ = h.join();
+            }
+
             info!("🛑 Shutdown signal received, waiting for threads to finish...");
+            self.defer();
 
             Ok(())
         })
         .unwrap()
+    }
+
+    fn defer(&self) {
+        let exec_duration = self.start_time.elapsed();
+
+        let downloader_stats = self.downloader.get_stats();
+        let spider_manager_stats = self.spider_manager.get_stats();
+        let scheduler_stats = self.scheduler.lock().unwrap().get_stats();
+
+        println!("{}", downloader_stats);
+        println!("{}", spider_manager_stats);
+        println!("{}", scheduler_stats);
+
+        println!("Execution Duration: {}", human_duration(exec_duration));
     }
 }

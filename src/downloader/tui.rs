@@ -1,3 +1,4 @@
+use byte_unit::{Byte, UnitType};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -46,24 +47,24 @@ impl<'a> Widget for DownloaderWidget<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let text = format!(
             "Active Requests: {}\n\
-             Waiting Requests: {}\n\
-             Peak Concurrent: {}\n\
-             \n\
-             Total Requests: {}\n\
-             Total Responses: {}\n\
-             Total Exceptions: {}\n\
-             \n\
-             Avg Response Time: {:.2}ms\n\
-             Min Response Time: {:.2}ms\n\
-             Max Response Time: {:.2}ms\n\
-             \n\
-             Rate Limited: {}\n\
-             Request Bytes: {}\n\
-             Response Bytes: {}\n\
-             \n\
-             Request Rate: {:.2}(r/s)
-             \n\
-             Status Codes:\n{}",
+            Waiting Requests: {}\n\
+            Peak Concurrent: {}\n\
+            \n\
+            Total Requests: {}\n\
+            Total Responses: {}\n\
+            Total Exceptions: {}\n\
+            \n\
+            Avg Response Time: {:.2}ms\n\
+            Min Response Time: {:.2}ms\n\
+            Max Response Time: {:.2}ms\n\
+            \n\
+            Rate Limited: {}\n\
+            Request Bytes: {:.2}\n\
+            Response Bytes: {:.2}\n\
+            \n\
+            Request Rate: {:.2}(r/s)
+            \n\
+            Status Codes:\n{}",
             self.stats.active_requests,
             self.stats.waiting_requests,
             self.stats.peak_concurrent_requests,
@@ -74,8 +75,8 @@ impl<'a> Widget for DownloaderWidget<'a> {
             self.stats.min_response_time_ms,
             self.stats.max_response_time_ms,
             self.stats.rate_limited_count,
-            self.stats.total_request_bytes,
-            self.stats.total_response_bytes,
+            Byte::from_u64(self.stats.total_request_bytes).get_appropriate_unit(UnitType::Binary),
+            Byte::from_u64(self.stats.total_response_bytes).get_appropriate_unit(UnitType::Binary),
             self.stats.request_rate_s,
             self.format_status_codes()
         );

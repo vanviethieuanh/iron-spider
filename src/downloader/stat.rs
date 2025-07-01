@@ -1,3 +1,4 @@
+use byte_unit::{Byte, UnitType};
 use dashmap::DashMap;
 use reqwest::StatusCode;
 use std::collections::HashMap;
@@ -64,7 +65,7 @@ impl Default for DownloaderStats {
 
 impl fmt::Display for DownloaderStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "=== Downloader Statistics ===")?;
+        writeln!(f, "===== Downloader Stats =====")?;
         writeln!(
             f,
             "Active: {}, Waiting: {}, Peak: {}",
@@ -77,9 +78,9 @@ impl fmt::Display for DownloaderStats {
         )?;
         writeln!(
             f,
-            "Data: {} MB sent, {} MB received",
-            self.total_request_bytes / 1_000_000,
-            self.total_response_bytes / 1_000_000
+            "Data: {:.2} sent, {:.2} received",
+            Byte::from_u64(self.total_request_bytes).get_appropriate_unit(UnitType::Binary),
+            Byte::from_u64(self.total_response_bytes).get_appropriate_unit(UnitType::Binary),
         )?;
         writeln!(
             f,

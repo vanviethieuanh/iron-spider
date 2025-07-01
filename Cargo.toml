@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+byte-unit = "5.1.6"
 chrono = "0.4.41"
 color-eyre = "0.6.5"
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
