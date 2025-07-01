@@ -2,6 +2,7 @@ use std::{collections::HashSet, time::Duration};
 
 use governor::Quota;
 use reqwest::StatusCode;
+use tui_logger::LevelFilter;
 
 #[derive(Clone)]
 pub struct EngineConfig {
@@ -20,6 +21,7 @@ pub struct EngineConfig {
 
     // Shutdown when: no active requests AND scheduler is empty AND idle timeout
     pub idle_timeout: Duration,
+    pub tui_logger_level: LevelFilter,
 }
 
 impl Default for EngineConfig {
@@ -38,6 +40,8 @@ impl Default for EngineConfig {
             downloader_threads: 1,
             tui_stats_interval: Duration::from_secs(1),
             idle_timeout: Duration::from_secs(1),
+
+            tui_logger_level: LevelFilter::Info,
         }
     }
 }

@@ -13,6 +13,8 @@ use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
+    style::{Color, Style},
+    widgets::{Block, Borders},
 };
 use std::{
     io::stdout,
@@ -22,6 +24,8 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tui_logger::TuiLoggerWidget;
 
 pub struct TuiMonitor {
     downloader: Arc<Downloader>,
@@ -59,6 +63,13 @@ impl TuiMonitor {
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
+        tui_logger::init_logger(self.config.tui_logger_level)
+            .expect("failed to initialize tui_logger");
+
+        tracing_subscriber::registry()
+            .with(tui_logger::TuiTracingSubscriberLayer)
+            .init();
+
         loop {
             // Get current stats
             let downloader_stats = self.downloader.get_stats();
@@ -69,23 +80,36 @@ impl TuiMonitor {
             let shutdown_signal = self.shutdown_signal.clone();
 
             terminal.draw(|f| {
-                let chunks = Layout::default()
+                let vertical_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Percentage(50), // top half
+                        Constraint::Percentage(50), // bottom half (currently unused)
+                    ])
+                    .split(f.area());
+
+                let top_chunks = Layout::default()
                     .direction(Direction::Horizontal)
                     .constraints([
                         Constraint::Percentage(33),
                         Constraint::Percentage(33),
                         Constraint::Percentage(34),
                     ])
-                    .split(f.area());
+                    .split(vertical_chunks[0]);
 
-                let spider_widget = SpiderManagerWidget::new(&spider_manager_stats);
-                f.render_widget(spider_widget, chunks[0]);
+                f.render_widget(
+                    SpiderManagerWidget::new(&spider_manager_stats),
+                    top_chunks[0],
+                );
+                f.render_widget(SchedulerWidget::new(&scheduler_stats), top_chunks[1]);
+                f.render_widget(DownloaderWidget::new(&downloader_stats), top_chunks[2]);
 
-                let scheduler_widget = SchedulerWidget::new(&scheduler_stats);
-                f.render_widget(scheduler_widget, chunks[1]);
-
-                let spider_manager_widget = DownloaderWidget::new(&downloader_stats);
-                f.render_widget(spider_manager_widget, chunks[2]);
+                f.render_widget(
+                    TuiLoggerWidget::default()
+                        .block(Block::default().title("Logs").borders(Borders::ALL))
+                        .style(Style::default().fg(Color::White)),
+                    vertical_chunks[1],
+                );
             })?;
 
             // Handle input

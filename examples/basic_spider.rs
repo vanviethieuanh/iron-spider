@@ -159,6 +159,7 @@ fn main() {
         downloader_request_timeout: Duration::from_secs(10),
         http_error_allow_codes,
         concurrent_limit: 32,
+        tui_stats_interval: Duration::from_millis(500),
         ..Default::default()
     };
 
