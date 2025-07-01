@@ -9,7 +9,7 @@ use std::{
 };
 
 use crossbeam::channel::{Receiver, Sender};
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use tracing::{error, info, warn};
 
 use crate::{
@@ -66,6 +66,7 @@ impl RegisteredSpider {
 pub struct SpiderManager {
     pending_spiders: Mutex<VecDeque<u64>>,
     registered_spiders: DashMap<u64, RegisteredSpider>,
+    working_spiders: DashSet<u64>,
     stats_tracker: Arc<SpiderManagerStatsTracker>,
 }
 
@@ -74,6 +75,7 @@ impl SpiderManager {
         let start_spider_count = spiders.len();
         let registered_spiders = DashMap::with_capacity(spiders.len());
         let stats_tracker = Arc::new(SpiderManagerStatsTracker::new(start_spider_count));
+        let working_spiders = DashSet::new();
 
         let mut pending_spiders = VecDeque::new();
         for spider in spiders {
@@ -88,6 +90,7 @@ impl SpiderManager {
             pending_spiders: Mutex::new(pending_spiders),
             registered_spiders,
             stats_tracker,
+            working_spiders,
         }
     }
 
@@ -104,6 +107,7 @@ impl SpiderManager {
             }
 
             self.stats_tracker.deactivate_one_spider();
+            self.working_spiders.remove(&spider_id);
 
             registered_spider.inner.close();
             info!(
@@ -129,6 +133,7 @@ impl SpiderManager {
 
             if state.is_activated() {
                 self.stats_tracker.activate_one_spider();
+                self.working_spiders.insert(*spider_id);
             }
         }
     }
@@ -231,9 +236,18 @@ impl SpiderManager {
                 }
             }
         }
+        self.exit();
 
         info!("🕷️  Spider Manager thread stopped");
         Ok(())
+    }
+
+    fn exit(&self) {
+        let spider_ids: Vec<u64> = self.working_spiders.iter().map(|id| *id).collect();
+        for working_spider_id in spider_ids {
+            self.deactivate_spider(working_spider_id);
+        }
+        info!("All working spiders have been deactivated.");
     }
 
     fn try_activate_pending_spider(
