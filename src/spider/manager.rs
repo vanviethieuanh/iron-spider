@@ -236,13 +236,14 @@ impl SpiderManager {
                 }
             }
         }
-        self.exit();
+        self.close();
 
         info!("🕷️  Spider Manager thread stopped");
         Ok(())
     }
 
-    fn exit(&self) {
+    fn close(&self) {
+        info!("Spider Manager closing....");
         let spider_ids: Vec<u64> = self.working_spiders.iter().map(|id| *id).collect();
         for working_spider_id in spider_ids {
             self.deactivate_spider(working_spider_id);

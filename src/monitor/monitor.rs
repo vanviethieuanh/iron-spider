@@ -56,7 +56,16 @@ impl EngineMonitor {
             let idle_time = self.last_activity.lock().unwrap().elapsed();
             let scheduler_empty = self.scheduler.lock().unwrap().is_empty();
 
-            if active == 0 && scheduler_empty && idle_time >= self.config.idle_timeout {
+            let spider_manager_stats = self.spider_manager.get_stats();
+            let pipeline_manager_stats = self.pipeline_manager.get_stats();
+
+            if active == 0
+                && scheduler_empty
+                && idle_time >= self.config.idle_timeout
+                && spider_manager_stats.pending_spiders == 0
+                && spider_manager_stats.active_spiders == 0
+                && pipeline_manager_stats.processing_items == 0
+            {
                 info!("⏰ All work completed, initiating shutdown...");
                 self.shutdown_signal.store(true, Ordering::Relaxed);
                 break;
