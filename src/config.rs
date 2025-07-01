@@ -16,7 +16,7 @@ pub struct EngineConfig {
 
     pub pipeline_worker_threads: usize,
     pub downloader_threads: i32,
-    pub stats_interval: Duration,
+    pub tui_stats_interval: Duration,
 
     // Shutdown when: no active requests AND scheduler is empty AND idle timeout
     pub idle_timeout: Duration,
@@ -36,7 +36,7 @@ impl Default for EngineConfig {
 
             pipeline_worker_threads: 4,
             downloader_threads: 1,
-            stats_interval: Duration::from_secs(1),
+            tui_stats_interval: Duration::from_secs(1),
             idle_timeout: Duration::from_secs(1),
         }
     }

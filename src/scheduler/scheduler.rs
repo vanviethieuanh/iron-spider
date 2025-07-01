@@ -1,4 +1,4 @@
-use crate::request::IronRequest;
+use crate::{request::IronRequest, scheduler::stat::SchedulerStats};
 use crossbeam::channel::{Receiver, Sender, TryRecvError, unbounded};
 
 // Remove async_trait since these are synchronous operations
@@ -7,6 +7,13 @@ pub trait Scheduler: Send + Sync {
     fn is_empty(&self) -> bool;
     fn enqueue(&mut self, request: IronRequest) -> Result<(), SchedulerError>;
     fn count(&self) -> u64;
+
+    // Optional: Get stats for TUI
+    fn get_stats(&self) -> SchedulerStats {
+        SchedulerStats {
+            items_count: self.count(),
+        }
+    }
 
     // Optional: non-blocking dequeue for better performance
     fn try_dequeue(&mut self) -> Result<IronRequest, TryRecvError> {

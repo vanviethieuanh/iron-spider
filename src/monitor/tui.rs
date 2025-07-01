@@ -1,7 +1,7 @@
 use crate::{
     config::EngineConfig,
     downloader::{downloader::Downloader, tui::DownloaderWidget},
-    scheduler::scheduler::Scheduler,
+    scheduler::{scheduler::Scheduler, tui::SchedulerWidget},
     spider::{manager::SpiderManager, tui::SpiderManagerWidget},
 };
 use crossterm::{
@@ -13,8 +13,6 @@ use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
-    widgets::{Block, Borders, Paragraph},
 };
 use std::{
     io::stdout,
@@ -63,10 +61,10 @@ impl TuiMonitor {
 
         loop {
             // Get current stats
-            let stats = self.downloader.get_stats();
-            let scheduler_empty = self.scheduler.lock().unwrap().is_empty();
-            let scheduler_counter = self.scheduler.lock().unwrap().count();
-            let idle_time = self.last_activity.lock().unwrap().elapsed();
+            let downloader_stats = self.downloader.get_stats();
+            let spider_manager_stats = self.spider_manager.get_stats();
+            let scheduler_stats = self.scheduler.lock().unwrap().get_stats();
+
             let shutdown_active = self.shutdown_signal.load(Ordering::Relaxed);
             let shutdown_signal = self.shutdown_signal.clone();
 
@@ -80,44 +78,14 @@ impl TuiMonitor {
                     ])
                     .split(f.area());
 
-                let widget = DownloaderWidget::new(&stats);
-                f.render_widget(widget, chunks[2]);
+                let spider_widget = SpiderManagerWidget::new(&spider_manager_stats);
+                f.render_widget(spider_widget, chunks[0]);
 
-                let spider_stats = self.spider_manager.get_stats(); // assuming Arc<SpiderManagerStatsTracker>
-                let spider_widget = SpiderManagerWidget::new(&spider_stats);
-                f.render_widget(spider_widget, chunks[0]); // choose the appropriate `chunks[n]`
+                let scheduler_widget = SchedulerWidget::new(&scheduler_stats);
+                f.render_widget(scheduler_widget, chunks[1]);
 
-                let scheduler_text = format!(
-                    "Queue Empty: {}\n\
-                    Queue Items: {}\n\
-                    \n\
-                    Idle Time: {:.1}s\n\
-                    Idle Timeout: {:.1}s\n\
-                    \n\
-                    Shutdown Signal: {}",
-                    scheduler_empty,
-                    scheduler_counter,
-                    idle_time.as_secs_f64(),
-                    self.config.idle_timeout.as_secs_f64(),
-                    shutdown_active,
-                );
-
-                let scheduler_color = if scheduler_empty {
-                    Color::Green
-                } else {
-                    Color::Yellow
-                };
-                let scheduler_paragraph = Paragraph::new(scheduler_text)
-                    .block(
-                        Block::default()
-                            .title(format!(
-                                "Scheduler & System - Interval {} second(s)",
-                                self.config.stats_interval.as_secs_f64()
-                            ))
-                            .borders(Borders::ALL),
-                    )
-                    .style(Style::default().fg(scheduler_color));
-                f.render_widget(scheduler_paragraph, chunks[1]);
+                let spider_manager_widget = DownloaderWidget::new(&downloader_stats);
+                f.render_widget(spider_manager_widget, chunks[2]);
             })?;
 
             // Handle input
@@ -135,7 +103,7 @@ impl TuiMonitor {
                 break;
             }
 
-            std::thread::sleep(Duration::from_millis(500));
+            std::thread::sleep(self.config.tui_stats_interval);
         }
 
         // Restore terminal
