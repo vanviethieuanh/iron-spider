@@ -1,6 +1,7 @@
 use crate::{
     config::EngineConfig,
     downloader::{downloader::Downloader, tui::DownloaderWidget},
+    pipeline::{manager::PipelineManager, tui::PipelineManagerWidget},
     scheduler::{scheduler::Scheduler, tui::SchedulerWidget},
     spider::{manager::SpiderManager, tui::SpiderManagerWidget},
 };
@@ -12,9 +13,9 @@ use crossterm::{
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Style},
-    widgets::{Block, Borders},
+    widgets::{Block, Borders, Paragraph},
 };
 use std::{
     io::stdout,
@@ -30,9 +31,11 @@ use tui_logger::TuiLoggerWidget;
 pub struct TuiMonitor {
     downloader: Arc<Downloader>,
     scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
+    spider_manager: Arc<SpiderManager>,
+    pipeline_manager: Arc<PipelineManager>,
+
     shutdown_signal: Arc<AtomicBool>,
     last_activity: Arc<Mutex<Instant>>,
-    spider_manager: Arc<SpiderManager>,
     config: EngineConfig,
 }
 
@@ -41,6 +44,8 @@ impl TuiMonitor {
         downloader: Arc<Downloader>,
         scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
         spider_manager: Arc<SpiderManager>,
+        pipeline_manager: Arc<PipelineManager>,
+
         shutdown_signal: Arc<AtomicBool>,
         last_activity: Arc<Mutex<Instant>>,
         config: EngineConfig,
@@ -48,6 +53,7 @@ impl TuiMonitor {
         Self {
             downloader,
             scheduler,
+            pipeline_manager,
             shutdown_signal,
             last_activity,
             config,
@@ -73,6 +79,7 @@ impl TuiMonitor {
             // Get current stats
             let downloader_stats = self.downloader.get_stats();
             let spider_manager_stats = self.spider_manager.get_stats();
+            let pipline_manager_stats = self.pipeline_manager.get_stats();
             let scheduler_stats = self.scheduler.lock().unwrap().get_stats();
 
             let shutdown_active = self.shutdown_signal.load(Ordering::Relaxed);
@@ -82,8 +89,9 @@ impl TuiMonitor {
                 let vertical_chunks = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([
-                        Constraint::Percentage(50), // top half
-                        Constraint::Percentage(50), // bottom half (currently unused)
+                        Constraint::Length(1),
+                        Constraint::Percentage(30),
+                        Constraint::Percentage(70),
                     ])
                     .split(f.area());
 
@@ -95,7 +103,14 @@ impl TuiMonitor {
                         Constraint::Percentage(25),
                         Constraint::Percentage(25),
                     ])
-                    .split(vertical_chunks[0]);
+                    .split(vertical_chunks[1]);
+
+                let title = Paragraph::new(format!(
+                    "Spider Dashboard - {} ms",
+                    self.config.tui_stats_interval.as_millis()
+                ))
+                .alignment(Alignment::Center);
+                f.render_widget(title, vertical_chunks[0]);
 
                 f.render_widget(
                     SpiderManagerWidget::new(&spider_manager_stats),
@@ -103,12 +118,16 @@ impl TuiMonitor {
                 );
                 f.render_widget(SchedulerWidget::new(&scheduler_stats), top_chunks[1]);
                 f.render_widget(DownloaderWidget::new(&downloader_stats), top_chunks[2]);
+                f.render_widget(
+                    PipelineManagerWidget::new(&pipline_manager_stats),
+                    top_chunks[3],
+                );
 
                 f.render_widget(
                     TuiLoggerWidget::default()
                         .block(Block::default().title("Logs").borders(Borders::ALL))
                         .style(Style::default().fg(Color::White)),
-                    vertical_chunks[1],
+                    vertical_chunks[2],
                 );
             })?;
 

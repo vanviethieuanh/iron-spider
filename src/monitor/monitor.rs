@@ -10,13 +10,16 @@ use tracing::info;
 
 use crate::{
     config::EngineConfig, downloader::downloader::Downloader, monitor::tui::TuiMonitor,
-    scheduler::scheduler::Scheduler, spider::manager::SpiderManager,
+    pipeline::manager::PipelineManager, scheduler::scheduler::Scheduler,
+    spider::manager::SpiderManager,
 };
 
 pub struct EngineMonitor {
     pub downloader: Arc<Downloader>,
     pub spider_manager: Arc<SpiderManager>,
     pub scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
+    pub pipeline_manager: Arc<PipelineManager>,
+
     pub shutdown_signal: Arc<AtomicBool>,
     pub last_activity: Arc<Mutex<Instant>>,
     pub config: EngineConfig,
@@ -27,6 +30,8 @@ impl EngineMonitor {
         downloader: Arc<Downloader>,
         spider_manager: Arc<SpiderManager>,
         scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
+        pipeline_manager: Arc<PipelineManager>,
+
         shutdown_signal: Arc<AtomicBool>,
         last_activity: Arc<Mutex<Instant>>,
         config: EngineConfig,
@@ -34,10 +39,12 @@ impl EngineMonitor {
         Self {
             downloader,
             scheduler,
+            pipeline_manager,
+            spider_manager,
+
             shutdown_signal,
             last_activity,
             config,
-            spider_manager,
         }
     }
 
@@ -68,12 +75,14 @@ impl EngineMonitor {
         let shutdown_signal = Arc::clone(&self.shutdown_signal);
         let last_activity = Arc::clone(&self.last_activity);
         let spider_manager = Arc::clone(&self.spider_manager);
+        let pipeline_manager = Arc::clone(&self.pipeline_manager);
         let config = self.config.clone();
 
         let tui_monitor = TuiMonitor::new(
             downloader,
             scheduler,
             spider_manager,
+            pipeline_manager,
             shutdown_signal,
             last_activity,
             config,

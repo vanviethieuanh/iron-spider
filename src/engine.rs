@@ -52,17 +52,20 @@ impl Engine {
         };
         let spider_manager = Arc::new(SpiderManager::new(spiders));
         let scheduler = Arc::new(Mutex::new(scheduler));
+        let pipeline_manager = Arc::new(pipelines);
+
         let shutdown_signal = Arc::new(AtomicBool::new(false));
         let last_activity = Arc::new(Mutex::new(Instant::now()));
+
         let monitor = Arc::new(EngineMonitor::new(
             Arc::clone(&downloader),
             Arc::clone(&spider_manager),
             Arc::clone(&scheduler),
+            Arc::clone(&pipeline_manager),
             Arc::clone(&shutdown_signal),
             Arc::clone(&last_activity),
             config.clone(),
         ));
-        let pipeline_manager = Arc::new(pipelines);
         let start_time = Instant::now();
 
         Self {
@@ -185,11 +188,21 @@ impl Engine {
         let downloader_stats = self.downloader.get_stats();
         let spider_manager_stats = self.spider_manager.get_stats();
         let scheduler_stats = self.scheduler.lock().unwrap().get_stats();
+        let pipeline_manager_stats = self.pipeline_manager.get_stats();
 
-        println!("{}", downloader_stats);
+        println!("{:-^50}", "Spider Manager Stats");
         println!("{}", spider_manager_stats);
+
+        println!("{:-^50}", "Scheduler Stats");
         println!("{}", scheduler_stats);
 
-        println!("Execution Duration: {}", human_duration(exec_duration));
+        println!("{:-^50}", "Downloader Stats");
+        println!("{}", downloader_stats);
+
+        println!("{:-^50}", "Pipeline Manager Stats");
+        println!("{}", pipeline_manager_stats);
+
+        println!("{:-^50}", "Execution Duration");
+        println!("{:^50}", human_duration(exec_duration));
     }
 }

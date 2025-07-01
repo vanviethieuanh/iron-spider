@@ -65,7 +65,6 @@ impl Default for DownloaderStats {
 
 impl fmt::Display for DownloaderStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "===== Downloader Stats =====")?;
         writeln!(
             f,
             "Active: {}, Waiting: {}, Peak: {}",

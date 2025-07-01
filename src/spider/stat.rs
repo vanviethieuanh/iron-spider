@@ -15,7 +15,6 @@ impl fmt::Display for SpiderManagerStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let total = self.total_spiders.max(1) as f64;
 
-        writeln!(f, "===== Spider Manager Stats =====")?;
         writeln!(f, "Total Spiders       : {:>5}", self.total_spiders)?;
         writeln!(
             f,

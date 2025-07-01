@@ -3,7 +3,7 @@ use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
@@ -12,7 +12,14 @@ use crossbeam::channel::Receiver;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use tracing::{info, warn};
 
-use crate::{config::EngineConfig, item::ResultItem, pipeline::pipeline::Pipeline};
+use crate::{
+    config::EngineConfig,
+    item::ResultItem,
+    pipeline::{
+        pipeline::Pipeline,
+        stat::{PipelineManagerStats, PipelineManagerStatsTracker},
+    },
+};
 
 #[derive(Clone)]
 struct PrioritizedPipeline {
@@ -23,14 +30,7 @@ struct PrioritizedPipeline {
 pub struct PipelineManager {
     pipelines: Arc<Mutex<HashMap<TypeId, Vec<PrioritizedPipeline>>>>,
     thread_pool: ThreadPool,
-    // Number of items on processing pool.
-    processing_items: Arc<AtomicUsize>,
-    // Number of items processed by pipelines.
-    processed_items: Arc<AtomicUsize>,
-    // If any pipeline return a None,
-    // which mean the item push in is dropped by the pipeline.
-    // Number of items dropped by the pipelines.
-    dropped_items: Arc<AtomicUsize>,
+    stats_tracker: Arc<PipelineManagerStatsTracker>,
 }
 
 impl PipelineManager {
@@ -41,9 +41,7 @@ impl PipelineManager {
                 .num_threads(config.pipeline_worker_threads)
                 .build()
                 .unwrap(),
-            processing_items: Arc::new(AtomicUsize::new(0)),
-            processed_items: Arc::new(AtomicUsize::new(0)),
-            dropped_items: Arc::new(AtomicUsize::new(0)),
+            stats_tracker: Arc::new(PipelineManagerStatsTracker::new()),
         }
     }
 
@@ -80,15 +78,10 @@ impl PipelineManager {
             return;
         };
 
+        let stats_tracker = self.stats_tracker.clone();
+
         if let Some(pipelines) = pipelines {
-            // Clone the atomic counters for the spawned thread
-            let processing_items = Arc::clone(&self.processing_items);
-            let processed_items = Arc::clone(&self.processed_items);
-            let dropped_items = Arc::clone(&self.dropped_items);
-
-            // Increment processing counter
-            processing_items.fetch_add(1, Ordering::Relaxed);
-
+            stats_tracker.start_one();
             self.thread_pool.spawn(move || {
                 let mut current = Some(item);
 
@@ -100,28 +93,20 @@ impl PipelineManager {
                     current = pp.pipeline.try_process(current);
                 }
 
-                // Update statistics
-                processing_items.fetch_sub(1, Ordering::Relaxed);
-
                 if current.is_some() {
-                    processed_items.fetch_add(1, Ordering::Relaxed);
+                    stats_tracker.processed_one();
                 } else {
-                    dropped_items.fetch_add(1, Ordering::Relaxed);
+                    stats_tracker.dropped_one();
                 }
             });
         } else {
             warn!("No pipeline for type {:?}", type_id);
-            // Still count this as processed since we handled it
-            self.processed_items.fetch_add(1, Ordering::Relaxed);
+            stats_tracker.unrouted_one();
         }
     }
 
-    pub fn get_stats(&self) -> (usize, usize, usize) {
-        (
-            self.processing_items.load(Ordering::Relaxed),
-            self.processed_items.load(Ordering::Relaxed),
-            self.dropped_items.load(Ordering::Relaxed),
-        )
+    pub fn get_stats(&self) -> PipelineManagerStats {
+        self.stats_tracker.get_stats()
     }
 
     pub fn close_all_pipelines(&self) {

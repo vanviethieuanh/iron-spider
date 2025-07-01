@@ -25,8 +25,7 @@ impl<'a> Widget for SchedulerWidget<'a> {
             Color::Yellow
         };
 
-        let text = format!("Queue Items      : {}", self.stats.items_count);
-
+        let text = self.stats.to_string();
         Paragraph::new(text)
             .block(Block::default().title("Scheduler").borders(Borders::ALL))
             .style(Style::default().fg(color))
