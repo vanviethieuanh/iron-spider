@@ -16,7 +16,7 @@ pub struct EngineConfig {
     pub concurrent_limit: usize,
 
     pub pipeline_worker_threads: usize,
-    pub downloader_threads: i32,
+    pub spider_manager_worker_threads: usize,
     pub tui_stats_interval: Duration,
 
     // Shutdown when: no active requests AND scheduler is empty AND idle timeout
@@ -39,13 +39,13 @@ impl Default for EngineConfig {
             concurrent_limit: 32,
 
             pipeline_worker_threads: 4,
-            downloader_threads: 1,
             tui_stats_interval: Duration::from_secs(1),
             idle_timeout: Duration::from_secs(1),
 
             tui_logger_level: LevelFilter::Info,
 
             show_tui: false,
+            spider_manager_worker_threads: 4,
         }
     }
 }

@@ -10,9 +10,11 @@ use std::{
 
 use crossbeam::channel::{Receiver, Sender};
 use dashmap::{DashMap, DashSet};
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use tracing::{error, info, warn};
 
 use crate::{
+    config::EngineConfig,
     errors::EngineError,
     item::ResultItem,
     request::{IronRequest, Request},
@@ -65,17 +67,18 @@ impl RegisteredSpider {
 
 pub struct SpiderManager {
     pending_spiders: Mutex<VecDeque<u64>>,
-    registered_spiders: DashMap<u64, RegisteredSpider>,
-    working_spiders: DashSet<u64>,
+    registered_spiders: Arc<DashMap<u64, RegisteredSpider>>,
+    working_spiders: Arc<DashSet<u64>>,
     stats_tracker: Arc<SpiderManagerStatsTracker>,
+    thread_pool: ThreadPool,
 }
 
 impl SpiderManager {
-    pub fn new(spiders: Vec<Arc<dyn Spider>>) -> Self {
+    pub fn new(spiders: Vec<Arc<dyn Spider>>, config: &EngineConfig) -> Self {
         let start_spider_count = spiders.len();
-        let registered_spiders = DashMap::with_capacity(spiders.len());
+        let registered_spiders = Arc::new(DashMap::with_capacity(spiders.len()));
         let stats_tracker = Arc::new(SpiderManagerStatsTracker::new(start_spider_count));
-        let working_spiders = DashSet::new();
+        let working_spiders = Arc::new(DashSet::new());
 
         let mut pending_spiders = VecDeque::new();
         for spider in spiders {
@@ -91,32 +94,10 @@ impl SpiderManager {
             registered_spiders,
             stats_tracker,
             working_spiders,
-        }
-    }
-
-    fn deactivate_spider(&self, spider_id: u64) {
-        if let Some(registered_spider) = &self.registered_spiders.get(&spider_id) {
-            let state = &registered_spider.state;
-
-            if state.is_activated() {
-                warn!(
-                    "Spider '{} - {}' is forced to close.",
-                    registered_spider.inner.name(),
-                    registered_spider.id
-                );
-            }
-
-            self.stats_tracker.deactivate_one_spider();
-            self.working_spiders.remove(&spider_id);
-
-            registered_spider.inner.close();
-            info!(
-                "Spider '{} - {}' has closed.",
-                registered_spider.inner.name(),
-                registered_spider.id
-            );
-        } else {
-            error!("⚠️ Tried to deactivate unknown spider_id: {}", spider_id);
+            thread_pool: ThreadPoolBuilder::new()
+                .num_threads(config.spider_manager_worker_threads)
+                .build()
+                .unwrap(),
         }
     }
 
@@ -143,39 +124,7 @@ impl SpiderManager {
             .get_stats(self.pending_spiders.lock().unwrap().len())
     }
 
-    fn handle_requests_result(
-        &self,
-        requests: Vec<Request>,
-        spider: &Arc<RegisteredSpider>,
-        scheduler: &Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
-    ) {
-        let mut sched = scheduler.lock().unwrap();
-        let mut queued_requests = 0;
-
-        for request in requests {
-            let iron_request = IronRequest {
-                registered_spider: Arc::clone(&spider),
-                request,
-            };
-            match sched.enqueue(iron_request) {
-                Ok(_) => queued_requests += 1,
-                Err(e) => error!("Failed to enqueue request: {:?}", e),
-            }
-        }
-
-        if queued_requests > 0 {
-            spider
-                .state
-                .in_flight_requests
-                .fetch_add(queued_requests, Ordering::Relaxed);
-            spider
-                .state
-                .created_requests
-                .fetch_add(queued_requests, Ordering::Relaxed);
-        }
-    }
-
-    fn handle_items_result(&self, items: Vec<ResultItem>, item_sender: &Sender<ResultItem>) {
+    fn handle_items_result(items: Vec<ResultItem>, item_sender: &Sender<ResultItem>) {
         for item in items {
             if item_sender.send(item).is_err() {
                 break;
@@ -198,38 +147,61 @@ impl SpiderManager {
                 Ok(response) => {
                     *last_activity.lock().unwrap() = Instant::now();
 
-                    let spider_result = response
-                        .request
-                        .registered_spider
-                        .inner
-                        .parse(response.clone());
-                    response
-                        .request
-                        .registered_spider
-                        .state
-                        .in_flight_requests
-                        .fetch_sub(1, Ordering::Relaxed);
+                    let item_sender = item_sender.clone();
+                    let scheduler = Arc::clone(&scheduler);
+                    let stats_tracker = Arc::clone(&self.stats_tracker);
+                    let registered_spiders = Arc::clone(&self.registered_spiders);
+                    let working_spiders = Arc::clone(&self.working_spiders);
 
-                    let registered_spider = Arc::clone(&response.request.registered_spider);
-                    match spider_result {
-                        SpiderResult::Requests(requests) => {
-                            self.handle_requests_result(requests, &registered_spider, &scheduler);
-                        }
-                        SpiderResult::Items(items) => {
-                            self.handle_items_result(items, &item_sender);
-                        }
-                        SpiderResult::Both { requests, items } => {
-                            self.handle_requests_result(requests, &registered_spider, &scheduler);
-                            self.handle_items_result(items, &item_sender);
-                        }
-                        SpiderResult::None => {
-                            self.stats_tracker.drop_one_response();
-                        }
-                    }
+                    self.thread_pool.spawn_fifo(move || {
+                        let spider_result = response
+                            .request
+                            .registered_spider
+                            .inner
+                            .parse(response.clone());
 
-                    if !registered_spider.state.is_activated() {
-                        self.deactivate_spider(registered_spider.id);
-                    }
+                        response
+                            .request
+                            .registered_spider
+                            .state
+                            .in_flight_requests
+                            .fetch_sub(1, Ordering::Relaxed);
+
+                        let registered_spider = Arc::clone(&response.request.registered_spider);
+
+                        match spider_result {
+                            SpiderResult::Requests(requests) => {
+                                SpiderManager::handle_requests_result(
+                                    requests,
+                                    &registered_spider,
+                                    &scheduler,
+                                );
+                            }
+                            SpiderResult::Items(items) => {
+                                SpiderManager::handle_items_result(items, &item_sender);
+                            }
+                            SpiderResult::Both { requests, items } => {
+                                SpiderManager::handle_requests_result(
+                                    requests,
+                                    &registered_spider,
+                                    &scheduler,
+                                );
+                                SpiderManager::handle_items_result(items, &item_sender);
+                            }
+                            SpiderResult::None => {
+                                stats_tracker.drop_one_response();
+                            }
+                        }
+
+                        if !registered_spider.state.is_activated() {
+                            Self::deactivate_spider_static(
+                                &registered_spider.id,
+                                &registered_spiders,
+                                &stats_tracker,
+                                &working_spiders,
+                            );
+                        }
+                    });
                 }
                 Err(_) => {
                     std::thread::sleep(Duration::from_millis(10));
@@ -246,7 +218,18 @@ impl SpiderManager {
         info!("Spider Manager closing....");
         let spider_ids: Vec<u64> = self.working_spiders.iter().map(|id| *id).collect();
         for working_spider_id in spider_ids {
-            self.deactivate_spider(working_spider_id);
+            let stats_tracker = Arc::clone(&self.stats_tracker);
+            let registered_spiders = Arc::clone(&self.registered_spiders);
+            let working_spiders = Arc::clone(&self.working_spiders);
+
+            self.thread_pool.spawn_fifo(move || {
+                Self::deactivate_spider_static(
+                    &working_spider_id,
+                    &registered_spiders,
+                    &stats_tracker,
+                    &working_spiders,
+                );
+            });
         }
         info!("All working spiders have been deactivated.");
     }
@@ -292,6 +275,70 @@ impl SpiderManager {
                 Ok(())
             }
             None => Ok(()),
+        }
+    }
+}
+
+impl SpiderManager {
+    fn handle_requests_result(
+        requests: Vec<Request>,
+        spider: &Arc<RegisteredSpider>,
+        scheduler: &Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
+    ) {
+        let mut sched = scheduler.lock().unwrap();
+        let mut queued_requests = 0;
+
+        for request in requests {
+            let iron_request = IronRequest {
+                registered_spider: Arc::clone(&spider),
+                request,
+            };
+            match sched.enqueue(iron_request) {
+                Ok(_) => queued_requests += 1,
+                Err(e) => error!("Failed to enqueue request: {:?}", e),
+            }
+        }
+
+        if queued_requests > 0 {
+            spider
+                .state
+                .in_flight_requests
+                .fetch_add(queued_requests, Ordering::Relaxed);
+            spider
+                .state
+                .created_requests
+                .fetch_add(queued_requests, Ordering::Relaxed);
+        }
+    }
+
+    fn deactivate_spider_static(
+        spider_id: &u64,
+        registered_spiders: &DashMap<u64, RegisteredSpider>,
+        stats_tracker: &Arc<SpiderManagerStatsTracker>,
+        working_spiders: &DashSet<u64>,
+    ) {
+        if let Some(registered_spider) = registered_spiders.get(&spider_id) {
+            let state = &registered_spider.state;
+
+            if state.is_activated() {
+                warn!(
+                    "Spider '{} - {}' is forced to close.",
+                    registered_spider.inner.name(),
+                    registered_spider.id
+                );
+            }
+
+            stats_tracker.deactivate_one_spider();
+            working_spiders.remove(&spider_id);
+
+            registered_spider.inner.close();
+            info!(
+                "Spider '{} - {}' has closed.",
+                registered_spider.inner.name(),
+                registered_spider.id
+            );
+        } else {
+            error!("⚠️ Tried to deactivate unknown spider_id: {}", spider_id);
         }
     }
 }

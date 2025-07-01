@@ -51,7 +51,7 @@ impl Engine {
                 panic!();
             }
         };
-        let spider_manager = Arc::new(SpiderManager::new(spiders));
+        let spider_manager = Arc::new(SpiderManager::new(spiders, &config));
         let scheduler = Arc::new(Mutex::new(scheduler));
         let pipeline_manager = Arc::new(pipelines);
 
