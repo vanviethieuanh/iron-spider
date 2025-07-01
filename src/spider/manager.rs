@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fmt::Debug,
     sync::{
         Arc, Mutex,
@@ -9,6 +9,7 @@ use std::{
 };
 
 use crossbeam::channel::{Receiver, Sender};
+use dashmap::DashMap;
 use tracing::{error, info, warn};
 
 use crate::{
@@ -64,16 +65,14 @@ impl RegisteredSpider {
 
 pub struct SpiderManager {
     pending_spiders: Mutex<VecDeque<u64>>,
-    registered_spiders: Vec<RegisteredSpider>,
-    id_map: HashMap<u64, usize>,
+    registered_spiders: DashMap<u64, RegisteredSpider>,
     stats_tracker: Arc<SpiderManagerStatsTracker>,
 }
 
 impl SpiderManager {
     pub fn new(spiders: Vec<Arc<dyn Spider>>) -> Self {
         let start_spider_count = spiders.len();
-        let mut registered_spiders = Vec::with_capacity(spiders.len());
-        let mut id_map = HashMap::with_capacity(spiders.len());
+        let registered_spiders = DashMap::with_capacity(spiders.len());
         let stats_tracker = Arc::new(SpiderManagerStatsTracker::new(start_spider_count));
 
         let mut pending_spiders = VecDeque::new();
@@ -81,22 +80,19 @@ impl SpiderManager {
             let registered = RegisteredSpider::new(spider);
             let registered_id = registered.id();
 
-            id_map.insert(registered_id, registered_spiders.len());
-            registered_spiders.push(registered);
+            registered_spiders.insert(registered_id, registered);
             pending_spiders.push_back(registered_id);
         }
 
         Self {
             pending_spiders: Mutex::new(pending_spiders),
             registered_spiders,
-            id_map,
             stats_tracker,
         }
     }
 
     fn deactivate_spider(&self, spider_id: u64) {
-        if let Some(&index) = self.id_map.get(&spider_id) {
-            let registered_spider = &self.registered_spiders[index];
+        if let Some(registered_spider) = &self.registered_spiders.get(&spider_id) {
             let state = &registered_spider.state;
 
             if state.is_activated() {
@@ -121,8 +117,8 @@ impl SpiderManager {
     }
 
     fn activate_spider(&self, spider_id: &u64, num_requests: usize) {
-        if let Some(&index) = self.id_map.get(&spider_id) {
-            let state = &self.registered_spiders[index].state;
+        if let Some(registered_spiders) = &self.registered_spiders.get(&spider_id) {
+            let state = &registered_spiders.state;
 
             state
                 .in_flight_requests
@@ -258,31 +254,29 @@ impl SpiderManager {
             }
         };
 
-        let idx = self.id_map[&registered_spider_id];
-        let registered_spider = &self.registered_spiders[idx];
+        match self.registered_spiders.get(&registered_spider_id) {
+            Some(registered_spider) => {
+                let start_requests = registered_spider.inner.start_requests();
+                let start_requests_count = start_requests.len();
+                let is_active = start_requests_count > 0;
 
-        let start_requests = registered_spider.inner.start_requests();
-        let start_requests_count = start_requests.len();
-        let is_active = start_requests_count > 0;
+                for request in start_requests {
+                    sched
+                        .enqueue(registered_spider.make_request(request))
+                        .map_err(|e| {
+                            EngineError::InitializationError(format!(
+                                "Failed to seed request(s) of spider #{}, error: {:?}",
+                                &registered_spider_id, e
+                            ))
+                        })?;
+                }
 
-        for request in start_requests {
-            let idx = self.id_map[&registered_spider_id];
-            let registered = &self.registered_spiders[idx];
-
-            sched
-                .enqueue(registered.make_request(request))
-                .map_err(|e| {
-                    EngineError::InitializationError(format!(
-                        "Failed to seed request(s) of spider #{}, error: {:?}",
-                        &registered_spider_id, e
-                    ))
-                })?;
+                if is_active {
+                    self.activate_spider(&registered_spider_id, start_requests_count);
+                }
+                Ok(())
+            }
+            None => Ok(()),
         }
-
-        if is_active {
-            self.activate_spider(&registered_spider_id, start_requests_count);
-        }
-
-        Ok(())
     }
 }
