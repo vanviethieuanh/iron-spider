@@ -6,6 +6,8 @@ use std::{
     },
 };
 
+use crate::utils::format_number;
+
 pub struct PipelineManagerStats {
     // Number of items on processing pool.
     pub processing_items: usize,
@@ -24,10 +26,26 @@ pub struct PipelineManagerStats {
 
 impl Display for PipelineManagerStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Processing: {}", self.processing_items)?;
-        writeln!(f, "Processed : {}", self.processed_items)?;
-        writeln!(f, "Dropped   : {}", self.dropped_items)?;
-        writeln!(f, "Un-routed : {}", self.unrouted_item)?;
+        writeln!(
+            f,
+            "Processing: {}",
+            format_number(self.processing_items as u64)
+        )?;
+        writeln!(
+            f,
+            "Processed : {}",
+            format_number(self.processed_items as u64)
+        )?;
+        writeln!(
+            f,
+            "Dropped   : {}",
+            format_number(self.dropped_items as u64)
+        )?;
+        writeln!(
+            f,
+            "Un-routed : {}",
+            format_number(self.unrouted_item as u64)
+        )?;
         Ok(())
     }
 }

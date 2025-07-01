@@ -25,3 +25,20 @@ pub fn human_duration(d: Duration) -> String {
 
     parts.join(" ")
 }
+
+pub fn format_number(n: u64) -> String {
+    const THOUSAND: f64 = 1_000.0;
+    const MILLION: f64 = 1_000_000.0;
+    const BILLION: f64 = 1_000_000_000.0;
+    const TRILLION: f64 = 1_000_000_000_000.0;
+    const QUADRILLION: f64 = 1_000_000_000_000_000.0;
+
+    match n {
+        n if n >= QUADRILLION as u64 => format!("{:.2}Q", n as f64 / QUADRILLION),
+        n if n >= TRILLION as u64 => format!("{:.2}T", n as f64 / TRILLION),
+        n if n >= BILLION as u64 => format!("{:.2}B", n as f64 / BILLION),
+        n if n >= MILLION as u64 => format!("{:.2}M", n as f64 / MILLION),
+        n if n >= THOUSAND as u64 => format!("{:.2}K", n as f64 / THOUSAND),
+        _ => n.to_string(),
+    }
+}

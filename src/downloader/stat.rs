@@ -7,6 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use crate::utils::format_number;
+
 #[derive(Debug, Clone)]
 pub struct DownloaderStats {
     // Current state
@@ -73,7 +75,9 @@ impl fmt::Display for DownloaderStats {
         writeln!(
             f,
             "Total Requests: {}, Responses: {}, Exceptions: {}",
-            self.total_requests, self.total_responses, self.total_exceptions
+            format_number(self.total_requests),
+            format_number(self.total_responses),
+            format_number(self.total_exceptions)
         )?;
         writeln!(
             f,
@@ -90,14 +94,14 @@ impl fmt::Display for DownloaderStats {
         if !self.status_counts.is_empty() {
             writeln!(f, "Status Codes:")?;
             for (code, count) in &self.status_counts {
-                writeln!(f, "  {}: {}", code, count)?;
+                writeln!(f, "  {}: {}", code, format_number(count.clone()))?;
             }
         }
 
         if !self.exception_counts.is_empty() {
             writeln!(f, "Exceptions:")?;
             for (exc_type, count) in &self.exception_counts {
-                writeln!(f, "  {}: {}", exc_type, count)?;
+                writeln!(f, "  {}: {}", exc_type, format_number(count.clone()))?;
             }
         }
 
