@@ -28,6 +28,7 @@ pub struct Engine {
     downloader: Arc<Downloader>,
     scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
     monitor: Arc<EngineMonitor>,
+    config: EngineConfig,
 
     shutdown_signal: Arc<AtomicBool>,
     last_activity: Arc<Mutex<Instant>>,
@@ -77,6 +78,7 @@ impl Engine {
             last_activity,
             monitor,
             start_time,
+            config,
         }
     }
 
@@ -92,6 +94,8 @@ impl Engine {
         // Create communication channels
         let (resp_sender, resp_receiver) = unbounded::<Response>();
         let (item_sender, item_receiver) = unbounded::<ResultItem>();
+
+        let show_tui = self.config.show_tui;
 
         // Use crossbeam::scope for structured concurrency
         crossbeam::scope(|scope| {
@@ -157,15 +161,17 @@ impl Engine {
                 }
             }));
 
-            // 6. Spawn Health Check & Stats Thread
-            handles.push(scope.spawn({
-                let monitor = Arc::clone(&self.monitor);
+            // 6. Spawn Health Check & Stats Thread TUI
+            if show_tui {
+                handles.push(scope.spawn({
+                    let monitor = Arc::clone(&self.monitor);
 
-                move |_| {
-                    debug!("TUI thread is starting");
-                    let _ = monitor.start_tui();
-                }
-            }));
+                    move |_| {
+                        debug!("TUI thread is starting");
+                        let _ = monitor.start_tui();
+                    }
+                }))
+            };
 
             info!("🚀 All threads spawned, engine running...");
 
