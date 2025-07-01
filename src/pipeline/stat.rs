@@ -84,4 +84,8 @@ impl PipelineManagerStatsTracker {
     pub fn unrouted_one(&self) {
         self.unrouted_item.fetch_add(1, Ordering::Relaxed);
     }
+
+    pub fn is_idle(&self) -> bool {
+        self.processing_items.load(Ordering::Relaxed) == 0
+    }
 }

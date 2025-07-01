@@ -9,7 +9,10 @@ use std::{
 };
 
 use crossbeam::channel::Receiver;
-use rayon::{ThreadPool, ThreadPoolBuilder};
+use rayon::{
+    ThreadPool, ThreadPoolBuilder,
+    iter::{IntoParallelIterator, ParallelIterator},
+};
 use tracing::{info, warn};
 
 use crate::{
@@ -111,16 +114,28 @@ impl PipelineManager {
 
     pub fn close_all_pipelines(&self) {
         if let Ok(pipelines) = self.pipelines.lock() {
-            for (_, pipeline_vec) in pipelines.iter() {
-                for pp in pipeline_vec.iter() {
+            pipelines
+                .values()
+                .flat_map(|vec| vec.iter())
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .for_each(|pp| {
                     pp.pipeline.close();
-                }
+                });
+        }
+    }
+
+    pub fn wait_for_completion(&self) {
+        loop {
+            if self.stats_tracker.is_idle() {
+                break;
             }
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 
     pub fn start(&self, item_receiver: Receiver<ResultItem>, shutdown_signal: Arc<AtomicBool>) {
-        while !shutdown_signal.load(Ordering::Relaxed) {
+        while !shutdown_signal.load(Ordering::Relaxed) || !item_receiver.is_empty() {
             match item_receiver.try_recv() {
                 Ok(item) => {
                     // Process item through pipeline
@@ -131,6 +146,9 @@ impl PipelineManager {
                 }
             }
         }
+
+        self.wait_for_completion();
+        self.close_all_pipelines();
 
         info!("🔧 Pipeline Manager thread stopped");
     }
