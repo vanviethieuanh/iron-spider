@@ -7,6 +7,7 @@ use tui_logger::LevelFilter;
 #[derive(Clone)]
 pub struct EngineConfig {
     pub downloader_request_timeout: Duration,
+    pub downloader_connection_timeout: Duration,
     pub downloader_delay: Duration,
     pub downloader_request_quota: Option<Quota>,
     // TODO: implement download data quota
@@ -32,6 +33,7 @@ impl Default for EngineConfig {
 
         Self {
             downloader_request_timeout: Duration::from_secs(3),
+            downloader_connection_timeout: Duration::from_secs(3),
             downloader_delay: Duration::ZERO,
             downloader_request_quota: None,
             user_agent: Some("IronSpider/0.0.1".to_string()),

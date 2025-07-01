@@ -42,7 +42,7 @@ impl Downloader {
 
         let mut client_builder = Client::builder()
             .timeout(engine_config.downloader_request_timeout)
-            .connect_timeout(Duration::from_millis(200));
+            .connect_timeout(engine_config.downloader_connection_timeout);
         if let Some(ref user_agent) = engine_config.user_agent {
             client_builder = client_builder.user_agent(user_agent);
         }

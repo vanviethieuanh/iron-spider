@@ -160,6 +160,7 @@ fn main() {
         http_error_allow_codes,
         concurrent_limit: 32,
         tui_stats_interval: Duration::from_millis(500),
+        show_tui: true,
         ..Default::default()
     };
 
