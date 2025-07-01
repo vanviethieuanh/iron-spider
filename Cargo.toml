@@ -4,13 +4,23 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-async-trait = "0.1.88"
-futures = "0.3.31"
+byte-unit = "5.1.6"
+chrono = "0.4.41"
+crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
+crossterm = "0.29.0"
+dashmap = "6.1.0"
 governor = { version = "0.10.0", features = ["no_std"] }
-regex = "1.11.1"
+lazy_static = "1.5.0"
+ratatui = "0.29.0"
+rayon = "1.10.0"
 reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate", "cookies", "blocking"] }
-scraper = "0.23.1"
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.5.2", features = ["limit"] }
 tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tui-logger = { version = "0.17.3", features = ["tracing-support"] }
+
+[dev-dependencies]
+regex = "1.11.1"
+scraper = "0.23.1"
 tracing-subscriber = "0.3.19"

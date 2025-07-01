@@ -4,20 +4,19 @@ use std::{
     time::Duration,
 };
 
-use async_trait::async_trait;
 use iron_spider::{
-    config::Configuration,
+    config::EngineConfig,
     engine::Engine,
-    pipeline::{FnPipeline, Pipeline, PipelineManager},
-    request::Request,
+    pipeline::{fn_pipeline::FnPipeline, manager::PipelineManager},
+    request::{Request, RequestBuilder},
     response::Response,
-    scheduler::SimpleScheduler,
-    spider::{Spider, SpiderResult},
+    scheduler::scheduler::SimpleScheduler,
+    spider::spider::{Spider, SpiderResult},
 };
 use regex::Regex;
 use reqwest::Url;
 use scraper::{Html, Selector};
-use tracing::{Level, info};
+use tracing::info;
 
 #[derive(Debug)]
 pub struct ArticleItem {
@@ -25,7 +24,7 @@ pub struct ArticleItem {
     pub author: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ExampleSpider {
     pub discovered: Arc<RwLock<HashSet<String>>>,
 }
@@ -90,15 +89,19 @@ impl ExampleSpider {
     }
 }
 
-#[async_trait]
 impl Spider for ExampleSpider {
-    fn start_urls(&self) -> Vec<Request> {
-        (1..=1000)
-            .map(|i| {
-                let url = format!("http://localhost:5000/article/{}", 3)
+    fn start_requests(&self) -> Vec<Request> {
+        (0..30)
+            .map(|_| {
+                let url = format!("http://127.0.0.1:5000/article/{}", 3)
                     .parse::<Url>()
                     .expect("Invalid URL");
-                self.request(url, reqwest::Method::GET, None, None, None)
+
+                RequestBuilder::new()
+                    .url(url)
+                    .method(reqwest::Method::GET)
+                    .build()
+                    .expect("Failed to build request")
             })
             .collect()
     }
@@ -107,32 +110,31 @@ impl Spider for ExampleSpider {
         "example_spider"
     }
 
-    async fn parse(&self, response: Response) -> SpiderResult {
-        if let Some(item) = ExampleSpider::parse_article_html(&response.body) {
+    fn parse(&self, response: Response) -> SpiderResult {
+        if let Some(item) = response
+            .text()
+            .as_deref()
+            .and_then(ExampleSpider::parse_article_html)
+        {
             match extract_number(item.title.as_str()) {
                 Some(i) => {
-                    if i != 1 {
-                        self.mark_discovered(response.request.url.to_string());
+                    self.mark_discovered(response.url.to_string());
 
+                    if i != 1 {
                         let next_url_str = format!("./article/{}", i - 1);
-                        let next_url = response
-                            .request
-                            .url
-                            .join(&next_url_str)
-                            .expect("Invalid next URL");
+                        let next_url = response.url.join(&next_url_str).expect("Invalid next URL");
+
+                        let next_request = RequestBuilder::new()
+                            .url(next_url)
+                            .method(reqwest::Method::GET)
+                            .build()
+                            .expect("Failed to build next request");
 
                         SpiderResult::Both {
-                            requests: vec![self.request(
-                                next_url,
-                                reqwest::Method::GET,
-                                None,
-                                None,
-                                None,
-                            )],
+                            requests: vec![next_request],
                             items: vec![Box::new(item)],
                         }
                     } else {
-                        self.mark_discovered(response.request.url.to_string());
                         SpiderResult::Items(vec![Box::new(item)])
                     }
                 }
@@ -143,17 +145,29 @@ impl Spider for ExampleSpider {
             SpiderResult::None
         }
     }
+
+    fn close(&self) {
+        info!("Heyyyyyy, I'm leaving!!!");
+    }
 }
 
-#[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt()
-        .with_max_level(Level::INFO) // Or "debug" for more verbose logs
-        .init();
+fn main() {
+    let mut http_error_allow_codes = HashSet::new();
+    http_error_allow_codes.insert(reqwest::StatusCode::NOT_FOUND);
+
+    let config = EngineConfig {
+        downloader_request_timeout: Duration::from_secs(10),
+        http_error_allow_codes,
+        concurrent_limit: 32,
+        tui_stats_interval: Duration::from_millis(500),
+        ..Default::default()
+    };
 
     let scheduler = Box::new(SimpleScheduler::new());
     let example_spider = Arc::new(ExampleSpider::new());
-    let spiders: Vec<Box<dyn Spider>> = vec![Box::new((*example_spider).clone())];
+    let spiders: Vec<Arc<dyn Spider>> = (0..100)
+        .map(|_| Arc::new((*example_spider).clone()) as Arc<dyn Spider>)
+        .collect();
 
     let print_article_pipe = FnPipeline::new(|item: Option<ArticleItem>| {
         info!("Article item pipeline: {:?}", item);
@@ -168,21 +182,12 @@ async fn main() {
         })
     });
 
-    let mut pipeline_manager = PipelineManager::new();
+    let mut pipeline_manager = PipelineManager::new(&config);
     pipeline_manager.add_pipeline::<ArticleItem>(print_article_pipe, 30);
     pipeline_manager.add_pipeline::<ArticleItem>(transform_article_pipe, 10);
 
-    let mut http_error_allow_codes = HashSet::new();
-    http_error_allow_codes.insert(reqwest::StatusCode::NOT_FOUND);
-
-    let config = Some(Configuration {
-        downloader_request_timeout: Duration::from_secs(10),
-        http_error_allow_codes,
-        ..Default::default()
-    });
-
-    let mut engine = Engine::new(scheduler, spiders, pipeline_manager, config);
-    engine.start().await;
+    let mut engine = Engine::new(scheduler, spiders, pipeline_manager, Some(config));
+    let _ = engine.start();
 
     info!(
         "Discovered: {} url(s)",

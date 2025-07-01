@@ -1,9 +1,12 @@
 pub mod config;
 pub mod downloader;
 pub mod engine;
+pub mod errors;
 pub mod item;
+pub mod monitor;
 pub mod pipeline;
 pub mod request;
 pub mod response;
 pub mod scheduler;
 pub mod spider;
+pub(crate) mod utils;

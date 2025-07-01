@@ -1,184 +1,208 @@
-use std::sync::Arc;
+use std::{
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Instant,
+};
 
-use futures::future::join_all;
-use reqwest::Client;
-use tokio::{signal, sync::Mutex, task::JoinSet};
-use tracing::{debug, error, info, warn};
+use crossbeam::channel::unbounded;
+use tracing::{debug, error, info};
 
 use crate::{
-    config::Configuration,
-    downloader::Downloader,
-    pipeline::PipelineManager,
-    request::Request,
-    scheduler::Scheduler,
-    spider::{Spider, SpiderResult},
+    config::EngineConfig,
+    downloader::downloader::Downloader,
+    errors::EngineError,
+    item::ResultItem,
+    monitor::monitor::EngineMonitor,
+    pipeline::manager::PipelineManager,
+    response::Response,
+    scheduler::scheduler::Scheduler,
+    spider::{manager::SpiderManager, spider::Spider},
+    utils::human_duration,
 };
 
 pub struct Engine {
-    scheduler: Box<dyn Scheduler + Send + Sync>,
-    spiders: Vec<Box<dyn Spider>>,
-    pipelines: Arc<Mutex<PipelineManager>>,
-    config: Configuration,
+    spider_manager: Arc<SpiderManager>,
+    pipeline_manager: Arc<PipelineManager>,
     downloader: Arc<Downloader>,
-    tasks: JoinSet<()>,
+    scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
+    monitor: Arc<EngineMonitor>,
+
+    shutdown_signal: Arc<AtomicBool>,
+    last_activity: Arc<Mutex<Instant>>,
+    start_time: Instant,
 }
 
 impl Engine {
     pub fn new(
-        scheduler: Box<dyn Scheduler + Send + Sync>,
-        spiders: Vec<Box<dyn Spider>>,
+        scheduler: Box<dyn Scheduler>,
+        spiders: Vec<Arc<dyn Spider>>,
         pipelines: PipelineManager,
-        config: Option<Configuration>,
+        config: Option<EngineConfig>,
     ) -> Self {
         let config = config.unwrap_or_default();
 
-        let mut client_builder = Client::builder()
-            .timeout(config.downloader_request_timeout)
-            .connector_layer(tower::limit::concurrency::ConcurrencyLimitLayer::new(
-                config.concurrent_limit,
-            ));
+        let downloader = match Downloader::new(&config) {
+            Ok(d) => Arc::new(d),
+            Err(e) => {
+                error!("Downloader initialization failed: {}", e);
+                panic!();
+            }
+        };
+        let spider_manager = Arc::new(SpiderManager::new(spiders));
+        let scheduler = Arc::new(Mutex::new(scheduler));
+        let pipeline_manager = Arc::new(pipelines);
 
-        if let Some(ref user_agent) = config.user_agent {
-            client_builder = client_builder.user_agent(user_agent);
-        }
+        let shutdown_signal = Arc::new(AtomicBool::new(false));
+        let last_activity = Arc::new(Mutex::new(Instant::now()));
 
-        let downloader_client = client_builder
-            .build()
-            .expect("Failed to build downloader's client.");
-
-        let downloader_request_quota = config.downloader_request_quota;
-        let http_error_allow_codes = config.http_error_allow_codes.clone();
+        let monitor = Arc::new(EngineMonitor::new(
+            Arc::clone(&downloader),
+            Arc::clone(&spider_manager),
+            Arc::clone(&scheduler),
+            Arc::clone(&pipeline_manager),
+            Arc::clone(&shutdown_signal),
+            Arc::clone(&last_activity),
+            config.clone(),
+        ));
+        let start_time = Instant::now();
 
         Self {
             scheduler,
-            spiders,
-            pipelines: Arc::new(Mutex::new(pipelines)),
-            config,
-            downloader: Arc::new(Downloader::new(
-                downloader_client,
-                downloader_request_quota,
-                http_error_allow_codes,
-            )),
-            tasks: JoinSet::new(),
+            spider_manager,
+            pipeline_manager,
+            downloader,
+            shutdown_signal,
+            last_activity,
+            monitor,
+            start_time,
         }
     }
 
-    fn enqueue_start_urls(&self) {
-        let sender = self.scheduler.sender();
-        for spider in &self.spiders {
-            for req in spider.start_urls() {
-                if let Err(e) = sender.send(req) {
-                    error!("Failed to queue request to scheduler: {:?}", e);
+    pub fn start(&mut self) -> Result<(), EngineError> {
+        self.start_time = Instant::now();
+
+        let spider_stats = self.spider_manager.get_stats();
+        info!(
+            "🕷️ Starting Iron-Spider Engine {} spiders",
+            spider_stats.total_spiders
+        );
+
+        // Create communication channels
+        let (resp_sender, resp_receiver) = unbounded::<Response>();
+        let (item_sender, item_receiver) = unbounded::<ResultItem>();
+
+        // Use crossbeam::scope for structured concurrency
+        crossbeam::scope(|scope| {
+            let mut handles = vec![];
+
+            // 1. Spawn Spider Manager thread
+            // Spider Manager pushes requests to scheduler
+            handles.push(scope.spawn({
+                let scheduler = Arc::clone(&self.scheduler);
+                let resp_receiver = resp_receiver.clone();
+                let item_sender = item_sender.clone();
+                let shutdown_signal = Arc::clone(&self.shutdown_signal);
+                let err_handler_shutdown_signal = Arc::clone(&shutdown_signal);
+                let last_activity = Arc::clone(&self.last_activity);
+
+                let spider_manager = self.spider_manager.clone();
+
+                move |_| {
+                    debug!(" Spider Manager thread is starting");
+                    if let Err(err) = spider_manager.start(
+                        scheduler,
+                        resp_receiver,
+                        item_sender,
+                        shutdown_signal,
+                        last_activity,
+                    ) {
+                        error!("❌ SpiderManager crashed: {}", err);
+                        err_handler_shutdown_signal.store(true, Ordering::SeqCst);
+                    }
                 }
+            }));
+
+            // 2. Spawn Downloader thread
+            // Downloader pulls requests directly from scheduler
+            handles.push(scope.spawn({
+                let downloader = self.downloader.clone();
+
+                let scheduler = Arc::clone(&self.scheduler);
+                let resp_sender = resp_sender.clone();
+                let shutdown_signal = Arc::clone(&self.shutdown_signal);
+                let last_activity = Arc::clone(&self.last_activity);
+
+                debug!("Downloader thread is starting");
+                move |_| downloader.start(scheduler, resp_sender, shutdown_signal, last_activity)
+            }));
+
+            // 3. Pipeline Manager thread
+            handles.push(scope.spawn({
+                let item_receiver = item_receiver.clone();
+                let shutdown_signal = Arc::clone(&self.shutdown_signal);
+                let pipeline_manager = Arc::clone(&self.pipeline_manager);
+
+                debug!("Pipeline Manager thread is starting");
+                move |_| pipeline_manager.start(item_receiver, shutdown_signal)
+            }));
+
+            // 5. Spawn Health Check & Stats Thread
+            handles.push(scope.spawn({
+                let monitor = Arc::clone(&self.monitor);
+                move |_| {
+                    debug!("Health-check thread is starting");
+                    let _ = monitor.start();
+                }
+            }));
+
+            // 6. Spawn Health Check & Stats Thread
+            handles.push(scope.spawn({
+                let monitor = Arc::clone(&self.monitor);
+
+                move |_| {
+                    debug!("TUI thread is starting");
+                    let _ = monitor.start_tui();
+                }
+            }));
+
+            info!("🚀 All threads spawned, engine running...");
+
+            // Wait for all threads
+            for h in handles {
+                let _ = h.join();
             }
-        }
+
+            info!("🛑 Shutdown signal received, waiting for threads to finish...");
+            self.defer();
+
+            Ok(())
+        })
+        .unwrap()
     }
 
-    fn spawn_handle_request(&mut self, request: Request) {
-        let pipelines = Arc::clone(&self.pipelines);
-        let downloader = Arc::clone(&self.downloader);
-        let sender = self.scheduler.sender();
+    fn defer(&self) {
+        let exec_duration = self.start_time.elapsed();
 
-        self.tasks.spawn(async move {
-            let response = downloader.fetch(&request).await;
-            let result = match response {
-                Some(resp) => request.spider.parse(resp).await,
-                None => SpiderResult::None,
-            };
+        let downloader_stats = self.downloader.get_stats();
+        let spider_manager_stats = self.spider_manager.get_stats();
+        let scheduler_stats = self.scheduler.lock().unwrap().get_stats();
+        let pipeline_manager_stats = self.pipeline_manager.get_stats();
 
-            match result {
-                SpiderResult::Requests(requests) => {
-                    for req in requests {
-                        if sender.send(req).is_err() {
-                            warn!("Failed to enqueue request");
-                        }
-                    }
-                }
-                SpiderResult::Items(items) => {
-                    let pipelines = pipelines.lock().await;
-                    for item in items {
-                        pipelines.process_item(item);
-                    }
-                }
-                SpiderResult::Both { requests, items } => {
-                    for req in requests {
-                        if sender.send(req).is_err() {
-                            warn!("Failed to enqueue request");
-                        }
-                    }
-                    let pipelines = pipelines.lock().await;
-                    for item in items {
-                        pipelines.process_item(item);
-                    }
-                }
-                SpiderResult::None => {}
-            }
-        });
-    }
+        println!("{:-^50}", "Spider Manager Stats");
+        println!("{}", spider_manager_stats);
 
-    pub async fn stop(&self) {
-        info!("Stopping engine!");
+        println!("{:-^50}", "Scheduler Stats");
+        println!("{}", scheduler_stats);
 
-        // Call all spider close
-        let tasks = self.spiders.iter().map(|spider| spider.close());
-        join_all(tasks).await;
+        println!("{:-^50}", "Downloader Stats");
+        println!("{}", downloader_stats);
 
-        // Call all pipeline close
-        self.pipelines.lock().await.close_all();
-    }
+        println!("{:-^50}", "Pipeline Manager Stats");
+        println!("{}", pipeline_manager_stats);
 
-    pub fn completed(&self) -> bool {
-        self.tasks.is_empty() && self.downloader.is_idle() && self.scheduler.is_empty()
-    }
-
-    pub async fn start(&mut self) {
-        info!("Starting engine with {} spiders", self.spiders.len());
-
-        self.enqueue_start_urls();
-        loop {
-            tokio::select! {
-                maybe_request = self.scheduler.dequeue() => {
-                    match maybe_request {
-                        Some(request) => {
-                            debug!("Dequeued: {}", request.url);
-                            self.spawn_handle_request(request);
-                        }
-                        None => {
-                            if self.completed() {
-                                info!("No more tasks, downloader idle, and scheduler empty — exiting loop");
-                                self.stop().await;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                Some(result) = self.tasks.join_next() => {
-                    match result {
-                        Ok(_) => {
-                            debug!("Task finished");
-                        },
-                        Err(e) => {
-                            error!("Task failed: {:?}", e);
-                        },
-                    }
-
-                    if self.completed() {
-                        info!("No more tasks, downloader idle, and scheduler empty — exiting loop");
-                        self.stop().await;
-                        break;
-                    }
-                }
-
-                _ = signal::ctrl_c() => {
-                    info!("Ctrl+C pressed — stopping engine");
-                    self.stop().await;
-                    break;
-                }
-            }
-        }
-
-        self.scheduler.close_init_sender();
-        info!("Engine finished crawling.");
+        println!("{:-^50}", "Execution Duration");
+        println!("{:^50}", human_duration(exec_duration));
     }
 }
