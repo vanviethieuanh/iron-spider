@@ -11,7 +11,7 @@ use std::{
 use crossbeam::channel::{Receiver, Sender};
 use dashmap::{DashMap, DashSet};
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     config::EngineConfig,
@@ -134,7 +134,7 @@ impl SpiderManager {
 
     pub fn start(
         &self,
-        scheduler: Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
+        scheduler: Arc<dyn Scheduler>,
         resp_receiver: Receiver<Response>,
         item_sender: Sender<ResultItem>,
         shutdown_signal: Arc<AtomicBool>,
@@ -193,6 +193,14 @@ impl SpiderManager {
                             }
                         }
 
+                        debug!(
+                            "Spider #{}: (now: {})",
+                            registered_spider.id,
+                            registered_spider
+                                .state
+                                .in_flight_requests
+                                .load(Ordering::Relaxed)
+                        );
                         if !registered_spider.state.is_activated() {
                             Self::deactivate_spider_static(
                                 &registered_spider.id,
@@ -236,10 +244,9 @@ impl SpiderManager {
 
     fn try_activate_pending_spider(
         &self,
-        scheduler: &Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
+        scheduler: &Arc<dyn Scheduler>,
     ) -> Result<(), EngineError> {
-        let mut sched = scheduler.lock().unwrap();
-        let pending_request_count = sched.count();
+        let pending_request_count = scheduler.count();
         if pending_request_count > SCHEDULER_HOLDING_THRESOLD {
             return Ok(());
         }
@@ -259,7 +266,7 @@ impl SpiderManager {
                 let is_active = start_requests_count > 0;
 
                 for request in start_requests {
-                    sched
+                    scheduler
                         .enqueue(registered_spider.make_request(request))
                         .map_err(|e| {
                             EngineError::InitializationError(format!(
@@ -283,9 +290,8 @@ impl SpiderManager {
     fn handle_requests_result(
         requests: Vec<Request>,
         spider: &Arc<RegisteredSpider>,
-        scheduler: &Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
+        scheduler: &Arc<dyn Scheduler>,
     ) {
-        let mut sched = scheduler.lock().unwrap();
         let mut queued_requests = 0;
 
         for request in requests {
@@ -293,7 +299,7 @@ impl SpiderManager {
                 registered_spider: Arc::clone(&spider),
                 request,
             };
-            match sched.enqueue(iron_request) {
+            match scheduler.enqueue(iron_request) {
                 Ok(_) => queued_requests += 1,
                 Err(e) => error!("Failed to enqueue request: {:?}", e),
             }

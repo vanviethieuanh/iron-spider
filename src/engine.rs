@@ -26,7 +26,7 @@ pub struct Engine {
     spider_manager: Arc<SpiderManager>,
     pipeline_manager: Arc<PipelineManager>,
     downloader: Arc<Downloader>,
-    scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
+    scheduler: Arc<dyn Scheduler>,
     monitor: Arc<EngineMonitor>,
     config: EngineConfig,
 
@@ -37,7 +37,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(
-        scheduler: Box<dyn Scheduler>,
+        scheduler: Arc<dyn Scheduler>,
         spiders: Vec<Arc<dyn Spider>>,
         pipelines: PipelineManager,
         config: Option<EngineConfig>,
@@ -52,7 +52,6 @@ impl Engine {
             }
         };
         let spider_manager = Arc::new(SpiderManager::new(spiders, &config));
-        let scheduler = Arc::new(Mutex::new(scheduler));
         let pipeline_manager = Arc::new(pipelines);
 
         let shutdown_signal = Arc::new(AtomicBool::new(false));
@@ -193,7 +192,7 @@ impl Engine {
 
         let downloader_stats = self.downloader.get_stats();
         let spider_manager_stats = self.spider_manager.get_stats();
-        let scheduler_stats = self.scheduler.lock().unwrap().get_stats();
+        let scheduler_stats = self.scheduler.get_stats();
         let pipeline_manager_stats = self.pipeline_manager.get_stats();
 
         println!("{:-^50}", "Spider Manager Stats");

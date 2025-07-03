@@ -152,6 +152,13 @@ impl Spider for ExampleSpider {
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_target(false) // hides the module path
+        .with_thread_names(true)
+        .with_writer(std::io::stdout)
+        .init();
+
     let mut http_error_allow_codes = HashSet::new();
     http_error_allow_codes.insert(reqwest::StatusCode::NOT_FOUND);
 
@@ -160,13 +167,13 @@ fn main() {
         http_error_allow_codes,
         concurrent_limit: 32,
         tui_stats_interval: Duration::from_millis(500),
-        show_tui: true,
+        show_tui: false,
         ..Default::default()
     };
 
-    let scheduler = Box::new(SimpleScheduler::new());
+    let scheduler = Arc::new(SimpleScheduler::new());
     let example_spider = Arc::new(ExampleSpider::new());
-    let spiders: Vec<Arc<dyn Spider>> = (0..100)
+    let spiders: Vec<Arc<dyn Spider>> = (0..10)
         .map(|_| Arc::new((*example_spider).clone()) as Arc<dyn Spider>)
         .collect();
 

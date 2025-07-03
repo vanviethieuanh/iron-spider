@@ -17,7 +17,7 @@ use crate::{
 pub struct EngineMonitor {
     pub downloader: Arc<Downloader>,
     pub spider_manager: Arc<SpiderManager>,
-    pub scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
+    pub scheduler: Arc<dyn Scheduler>,
     pub pipeline_manager: Arc<PipelineManager>,
 
     pub shutdown_signal: Arc<AtomicBool>,
@@ -29,7 +29,7 @@ impl EngineMonitor {
     pub fn new(
         downloader: Arc<Downloader>,
         spider_manager: Arc<SpiderManager>,
-        scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
+        scheduler: Arc<dyn Scheduler>,
         pipeline_manager: Arc<PipelineManager>,
 
         shutdown_signal: Arc<AtomicBool>,
@@ -54,7 +54,7 @@ impl EngineMonitor {
 
             let active = self.downloader.get_stats().active_requests;
             let idle_time = self.last_activity.lock().unwrap().elapsed();
-            let scheduler_empty = self.scheduler.lock().unwrap().is_empty();
+            let scheduler_empty = self.scheduler.is_empty();
 
             let spider_manager_stats = self.spider_manager.get_stats();
             let pipeline_manager_stats = self.pipeline_manager.get_stats();

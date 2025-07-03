@@ -30,7 +30,7 @@ use tui_logger::TuiLoggerWidget;
 
 pub struct TuiMonitor {
     downloader: Arc<Downloader>,
-    scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
+    scheduler: Arc<dyn Scheduler>,
     spider_manager: Arc<SpiderManager>,
     pipeline_manager: Arc<PipelineManager>,
 
@@ -42,7 +42,7 @@ pub struct TuiMonitor {
 impl TuiMonitor {
     pub fn new(
         downloader: Arc<Downloader>,
-        scheduler: Arc<Mutex<Box<dyn Scheduler>>>,
+        scheduler: Arc<dyn Scheduler>,
         spider_manager: Arc<SpiderManager>,
         pipeline_manager: Arc<PipelineManager>,
 
@@ -80,7 +80,7 @@ impl TuiMonitor {
             let downloader_stats = self.downloader.get_stats();
             let spider_manager_stats = self.spider_manager.get_stats();
             let pipline_manager_stats = self.pipeline_manager.get_stats();
-            let scheduler_stats = self.scheduler.lock().unwrap().get_stats();
+            let scheduler_stats = self.scheduler.get_stats();
 
             let shutdown_active = self.shutdown_signal.load(Ordering::Relaxed);
             let shutdown_signal = self.shutdown_signal.clone();

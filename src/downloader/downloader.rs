@@ -76,7 +76,7 @@ impl Downloader {
     // Start a async runtime for downlaoder
     pub fn start(
         &self,
-        scheduler: Arc<std::sync::Mutex<Box<dyn Scheduler>>>,
+        scheduler: Arc<dyn Scheduler>,
         resp_sender: Sender<Response>,
         shutdown_signal: Arc<AtomicBool>,
         last_activity: Arc<std::sync::Mutex<Instant>>,
@@ -92,13 +92,7 @@ impl Downloader {
                     continue;
                 }
 
-                // Pull request from scheduler
-                let request = {
-                    let mut sched = scheduler.lock().unwrap();
-                    sched.dequeue()
-                };
-
-                match request {
+                match scheduler.dequeue() {
                     Some(iron_req) => {
                         self.stats_tracker.inc_waiting();
                         *last_activity.lock().unwrap() = Instant::now();
