@@ -1,14 +1,16 @@
 use std::{
-    collections::VecDeque,
     fmt::Debug,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
 
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::{
+    channel::{Receiver, Sender},
+    queue::ArrayQueue,
+};
 use dashmap::{DashMap, DashSet};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use tracing::{debug, error, info, warn};
@@ -66,7 +68,7 @@ impl RegisteredSpider {
 }
 
 pub struct SpiderManager {
-    pending_spiders: Mutex<VecDeque<u64>>,
+    pending_spiders: ArrayQueue<u64>,
     registered_spiders: Arc<DashMap<u64, RegisteredSpider>>,
     working_spiders: Arc<DashSet<u64>>,
     stats_tracker: Arc<SpiderManagerStatsTracker>,
@@ -80,17 +82,17 @@ impl SpiderManager {
         let stats_tracker = Arc::new(SpiderManagerStatsTracker::new(start_spider_count));
         let working_spiders = Arc::new(DashSet::new());
 
-        let mut pending_spiders = VecDeque::new();
+        let pending_spiders = ArrayQueue::new(spiders.len());
         for spider in spiders {
             let registered = RegisteredSpider::new(spider);
             let registered_id = registered.id();
 
             registered_spiders.insert(registered_id, registered);
-            pending_spiders.push_back(registered_id);
+            let _ = pending_spiders.push(registered_id);
         }
 
         Self {
-            pending_spiders: Mutex::new(pending_spiders),
+            pending_spiders,
             registered_spiders,
             stats_tracker,
             working_spiders,
@@ -120,8 +122,7 @@ impl SpiderManager {
     }
 
     pub fn get_stats(&self) -> SpiderManagerStats {
-        self.stats_tracker
-            .get_stats(self.pending_spiders.lock().unwrap().len())
+        self.stats_tracker.get_stats(self.pending_spiders.len())
     }
 
     fn handle_items_result(items: Vec<ResultItem>, item_sender: &Sender<ResultItem>) {
@@ -252,8 +253,7 @@ impl SpiderManager {
         }
 
         let registered_spider_id = {
-            let mut pending_spiders = self.pending_spiders.lock().unwrap();
-            match pending_spiders.pop_front() {
+            match self.pending_spiders.pop() {
                 Some(spider) => spider,
                 None => return Ok(()),
             }
