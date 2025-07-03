@@ -1,14 +1,14 @@
 use std::{
     any::TypeId,
-    collections::HashMap,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
 
 use crossbeam::channel::Receiver;
+use dashmap::DashMap;
 use rayon::{
     ThreadPool, ThreadPoolBuilder,
     iter::{IntoParallelIterator, ParallelIterator},
@@ -31,7 +31,7 @@ struct PrioritizedPipeline {
 }
 
 pub struct PipelineManager {
-    pipelines: Arc<Mutex<HashMap<TypeId, Vec<PrioritizedPipeline>>>>,
+    pipelines: Arc<DashMap<TypeId, Vec<PrioritizedPipeline>>>,
     thread_pool: ThreadPool,
     stats_tracker: Arc<PipelineManagerStatsTracker>,
 }
@@ -39,7 +39,7 @@ pub struct PipelineManager {
 impl PipelineManager {
     pub fn new(config: &EngineConfig) -> Self {
         Self {
-            pipelines: Arc::new(Mutex::new(HashMap::new())),
+            pipelines: Arc::new(DashMap::new()),
             thread_pool: ThreadPoolBuilder::new()
                 .num_threads(config.pipeline_worker_threads)
                 .build()
@@ -58,28 +58,18 @@ impl PipelineManager {
             pipeline: Arc::new(pipeline),
         };
 
-        if let Ok(mut pipelines) = self.pipelines.lock() {
-            pipelines
-                .entry(type_id)
-                .or_insert_with(Vec::new)
-                .push(prioritized);
-
-            if let Some(vec) = pipelines.get_mut(&type_id) {
+        self.pipelines
+            .entry(type_id)
+            .and_modify(|vec| {
+                vec.push(prioritized.clone());
                 vec.sort_by_key(|pp| pp.priority);
-            }
-        }
+            })
+            .or_insert_with(|| vec![prioritized]);
     }
 
     pub fn process_item(&self, item: ResultItem) {
         let type_id = item.type_id();
-
-        // Get pipelines for this type
-        let pipelines = if let Ok(pipeline_map) = self.pipelines.lock() {
-            pipeline_map.get(&type_id).cloned()
-        } else {
-            warn!("Failed to acquire lock on pipelines");
-            return;
-        };
+        let pipelines = self.pipelines.get(&type_id).map(|entry| entry.clone());
 
         let stats_tracker = self.stats_tracker.clone();
 
@@ -113,16 +103,22 @@ impl PipelineManager {
     }
 
     pub fn close_all_pipelines(&self) {
-        if let Ok(pipelines) = self.pipelines.lock() {
-            pipelines
-                .values()
-                .flat_map(|vec| vec.iter())
-                .collect::<Vec<_>>()
-                .into_par_iter()
-                .for_each(|pp| {
-                    pp.pipeline.close();
-                });
-        }
+        let all_pipelines: Vec<Arc<dyn Pipeline>> = self
+            .pipelines
+            .iter()
+            .flat_map(|entry| {
+                // Clone the whole vector here so we don't return a reference
+                entry
+                    .value()
+                    .iter()
+                    .map(|pp| pp.pipeline.clone())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        all_pipelines.into_par_iter().for_each(|pipeline| {
+            pipeline.close();
+        });
     }
 
     pub fn wait_for_completion(&self) {
