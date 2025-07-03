@@ -65,6 +65,30 @@ impl RegisteredSpider {
             request,
         }
     }
+
+    pub fn request_started(&self, num: usize) {
+        self.state
+            .in_flight_requests
+            .fetch_add(num, Ordering::Relaxed);
+        self.state
+            .created_requests
+            .fetch_add(num, Ordering::Relaxed);
+    }
+
+    pub fn request_finished(&self) {
+        self.state
+            .in_flight_requests
+            .fetch_sub(1, Ordering::Relaxed);
+        debug!(
+            "Done 1 request, in flight: {} - {}",
+            self.state.in_flight_requests.load(Ordering::Relaxed),
+            self.is_activated()
+        );
+    }
+
+    pub fn is_activated(&self) -> bool {
+        self.state.is_activated()
+    }
 }
 
 pub struct SpiderManager {
@@ -105,16 +129,8 @@ impl SpiderManager {
 
     fn activate_spider(&self, spider_id: &u64, num_requests: usize) {
         if let Some(registered_spiders) = &self.registered_spiders.get(&spider_id) {
-            let state = &registered_spiders.state;
-
-            state
-                .in_flight_requests
-                .fetch_add(num_requests, Ordering::Relaxed);
-            state
-                .created_requests
-                .fetch_add(num_requests, Ordering::Relaxed);
-
-            if state.is_activated() {
+            registered_spiders.request_started(num_requests);
+            if registered_spiders.is_activated() {
                 self.stats_tracker.activate_one_spider();
                 self.working_spiders.insert(*spider_id);
             }
@@ -161,13 +177,6 @@ impl SpiderManager {
                             .inner
                             .parse(response.clone());
 
-                        response
-                            .request
-                            .registered_spider
-                            .state
-                            .in_flight_requests
-                            .fetch_sub(1, Ordering::Relaxed);
-
                         let registered_spider = Arc::clone(&response.request.registered_spider);
 
                         match spider_result {
@@ -193,27 +202,23 @@ impl SpiderManager {
                                 stats_tracker.drop_one_response();
                             }
                         }
-
-                        debug!(
-                            "Spider #{}: (now: {})",
-                            registered_spider.id,
-                            registered_spider
-                                .state
-                                .in_flight_requests
-                                .load(Ordering::Relaxed)
-                        );
-                        if !registered_spider.state.is_activated() {
-                            Self::deactivate_spider_static(
-                                &registered_spider.id,
-                                &registered_spiders,
-                                &stats_tracker,
-                                &working_spiders,
-                            );
-                        }
                     });
                 }
                 Err(_) => {
                     std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+
+            for spider_entry in self.registered_spiders.iter() {
+                let id = *spider_entry.key();
+                let spider = spider_entry.value();
+                if !spider.state.is_activated() && self.working_spiders.contains(&id) {
+                    Self::deactivate_spider_static(
+                        &id,
+                        &self.registered_spiders,
+                        &self.stats_tracker,
+                        &self.working_spiders,
+                    );
                 }
             }
         }
@@ -289,14 +294,14 @@ impl SpiderManager {
 impl SpiderManager {
     fn handle_requests_result(
         requests: Vec<Request>,
-        spider: &Arc<RegisteredSpider>,
+        registered_spider: &Arc<RegisteredSpider>,
         scheduler: &Arc<dyn Scheduler>,
     ) {
         let mut queued_requests = 0;
 
         for request in requests {
             let iron_request = IronRequest {
-                registered_spider: Arc::clone(&spider),
+                registered_spider: Arc::clone(&registered_spider),
                 request,
             };
             match scheduler.enqueue(iron_request) {
@@ -306,14 +311,7 @@ impl SpiderManager {
         }
 
         if queued_requests > 0 {
-            spider
-                .state
-                .in_flight_requests
-                .fetch_add(queued_requests, Ordering::Relaxed);
-            spider
-                .state
-                .created_requests
-                .fetch_add(queued_requests, Ordering::Relaxed);
+            registered_spider.request_started(queued_requests);
         }
     }
 

@@ -9,7 +9,7 @@ use governor::clock::DefaultClock;
 use governor::state::{InMemoryState, NotKeyed};
 use reqwest::{Client, StatusCode};
 use tokio::sync::Semaphore;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::config::EngineConfig;
 use crate::downloader::stat::{DownloaderStats, DownloaderStatsTracker};
@@ -107,6 +107,7 @@ impl Downloader {
                         // Perform HTTP request
                         join_set.spawn(async move {
                             if let Some(limiter) = limiter.as_ref() {
+                                debug!("Waiting for rate limiter!");
                                 limiter.until_ready().await;
                             }
                             let _permit = download_sem.acquire().await.unwrap();
@@ -128,6 +129,7 @@ impl Downloader {
 
                             drop(_permit);
                             stats_tracker.dec_active();
+                            iron_req.registered_spider.request_finished();
 
                             match resp {
                                 Ok(r) => {
@@ -150,15 +152,16 @@ impl Downloader {
                                             request: Arc::new(iron_req),
                                             protocol: Some(version),
                                         });
+
+                                        stats_tracker.inc_response(
+                                            status,
+                                            body_len as u64,
+                                            response_time,
+                                        );
                                     } else {
                                         error!("Status error [{}]: {}", status, url);
+                                        stats_tracker.inc_exception("status");
                                     }
-
-                                    stats_tracker.inc_response(
-                                        status,
-                                        body_len as u64,
-                                        response_time,
-                                    );
                                 }
                                 Err(e) => {
                                     if e.is_timeout() {
