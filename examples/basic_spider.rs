@@ -201,4 +201,6 @@ fn main() {
         "Discovered: {} url(s)",
         example_spider.discovered_count().to_string().as_str()
     );
+
+    drop(engine);
 }

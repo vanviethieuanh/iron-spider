@@ -20,10 +20,10 @@ use ratatui::{
 use std::{
     io::stdout,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tui_logger::TuiLoggerWidget;
@@ -35,7 +35,6 @@ pub struct TuiMonitor {
     pipeline_manager: Arc<PipelineManager>,
 
     shutdown_signal: Arc<AtomicBool>,
-    last_activity: Arc<Mutex<Instant>>,
     config: EngineConfig,
 }
 
@@ -47,7 +46,6 @@ impl TuiMonitor {
         pipeline_manager: Arc<PipelineManager>,
 
         shutdown_signal: Arc<AtomicBool>,
-        last_activity: Arc<Mutex<Instant>>,
         config: EngineConfig,
     ) -> Self {
         Self {
@@ -55,7 +53,6 @@ impl TuiMonitor {
             scheduler,
             pipeline_manager,
             shutdown_signal,
-            last_activity,
             config,
             spider_manager,
         }

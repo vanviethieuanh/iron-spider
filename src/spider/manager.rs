@@ -4,6 +4,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
+    thread,
     time::{Duration, Instant},
 };
 
@@ -141,14 +142,6 @@ impl SpiderManager {
         self.stats_tracker.get_stats(self.pending_spiders.len())
     }
 
-    fn handle_items_result(items: Vec<ResultItem>, item_sender: &Sender<ResultItem>) {
-        for item in items {
-            if item_sender.send(item).is_err() {
-                break;
-            }
-        }
-    }
-
     pub fn start(
         &self,
         scheduler: Arc<dyn Scheduler>,
@@ -167,41 +160,30 @@ impl SpiderManager {
                     let item_sender = item_sender.clone();
                     let scheduler = Arc::clone(&scheduler);
                     let stats_tracker = Arc::clone(&self.stats_tracker);
-                    let registered_spiders = Arc::clone(&self.registered_spiders);
-                    let working_spiders = Arc::clone(&self.working_spiders);
 
                     self.thread_pool.spawn_fifo(move || {
+                        stats_tracker.parse_thread_started();
                         let spider_result = response
                             .request
                             .registered_spider
                             .inner
                             .parse(response.clone());
 
-                        let registered_spider = Arc::clone(&response.request.registered_spider);
+                        info!("Got result");
 
-                        match spider_result {
-                            SpiderResult::Requests(requests) => {
-                                SpiderManager::handle_requests_result(
-                                    requests,
-                                    &registered_spider,
-                                    &scheduler,
-                                );
-                            }
-                            SpiderResult::Items(items) => {
-                                SpiderManager::handle_items_result(items, &item_sender);
-                            }
-                            SpiderResult::Both { requests, items } => {
-                                SpiderManager::handle_requests_result(
-                                    requests,
-                                    &registered_spider,
-                                    &scheduler,
-                                );
-                                SpiderManager::handle_items_result(items, &item_sender);
-                            }
-                            SpiderResult::None => {
-                                stats_tracker.drop_one_response();
-                            }
-                        }
+                        Self::handler_spider_result(
+                            response,
+                            item_sender,
+                            scheduler,
+                            &stats_tracker,
+                            spider_result,
+                        );
+
+                        info!("Result handled");
+
+                        stats_tracker.parse_thread_finished();
+
+                        info!("tracked");
                     });
                 }
                 Err(_) => {
@@ -222,6 +204,7 @@ impl SpiderManager {
                 }
             }
         }
+
         self.close();
 
         info!("🕷️  Spider Manager thread stopped");
@@ -230,21 +213,32 @@ impl SpiderManager {
 
     fn close(&self) {
         info!("Spider Manager closing....");
-        let spider_ids: Vec<u64> = self.working_spiders.iter().map(|id| *id).collect();
-        for working_spider_id in spider_ids {
-            let stats_tracker = Arc::clone(&self.stats_tracker);
-            let registered_spiders = Arc::clone(&self.registered_spiders);
-            let working_spiders = Arc::clone(&self.working_spiders);
 
-            self.thread_pool.spawn_fifo(move || {
-                Self::deactivate_spider_static(
-                    &working_spider_id,
-                    &registered_spiders,
-                    &stats_tracker,
-                    &working_spiders,
-                );
-            });
+        let spider_ids: Vec<u64> = self.working_spiders.iter().map(|id| *id).collect();
+
+        let stats_tracker = &self.stats_tracker;
+        let registered_spiders = &self.registered_spiders;
+        let working_spiders = &self.working_spiders;
+
+        self.thread_pool.scope(|s| {
+            for working_spider_id in &spider_ids {
+                s.spawn(move |_| {
+                    Self::deactivate_spider_static(
+                        &working_spider_id,
+                        registered_spiders,
+                        stats_tracker,
+                        working_spiders,
+                    );
+                });
+            }
+        });
+
+        // Wait for all parse threads to finish
+        info!("Waiting for parse threads to finish...");
+        while stats_tracker.any_parse_threads() {
+            thread::sleep(Duration::from_millis(100));
         }
+
         info!("All working spiders have been deactivated.");
     }
 
@@ -292,6 +286,40 @@ impl SpiderManager {
 }
 
 impl SpiderManager {
+    fn handler_spider_result(
+        response: Response,
+        item_sender: Sender<ResultItem>,
+        scheduler: Arc<dyn Scheduler + 'static>,
+        stats_tracker: &Arc<SpiderManagerStatsTracker>,
+        spider_result: SpiderResult,
+    ) {
+        let registered_spider = Arc::clone(&response.request.registered_spider);
+
+        match spider_result {
+            SpiderResult::Requests(requests) => {
+                SpiderManager::handle_requests_result(requests, &registered_spider, &scheduler);
+            }
+            SpiderResult::Items(items) => {
+                SpiderManager::handle_items_result(items, &item_sender);
+            }
+            SpiderResult::Both { requests, items } => {
+                SpiderManager::handle_requests_result(requests, &registered_spider, &scheduler);
+                SpiderManager::handle_items_result(items, &item_sender);
+            }
+            SpiderResult::None => {
+                stats_tracker.drop_one_response();
+            }
+        }
+    }
+
+    fn handle_items_result(items: Vec<ResultItem>, item_sender: &Sender<ResultItem>) {
+        for item in items {
+            if item_sender.send(item).is_err() {
+                break;
+            }
+        }
+    }
+
     fn handle_requests_result(
         requests: Vec<Request>,
         registered_spider: &Arc<RegisteredSpider>,

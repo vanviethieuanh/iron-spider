@@ -82,7 +82,6 @@ impl EngineMonitor {
         let downloader = Arc::clone(&self.downloader);
         let scheduler = Arc::clone(&self.scheduler);
         let shutdown_signal = Arc::clone(&self.shutdown_signal);
-        let last_activity = Arc::clone(&self.last_activity);
         let spider_manager = Arc::clone(&self.spider_manager);
         let pipeline_manager = Arc::clone(&self.pipeline_manager);
         let config = self.config.clone();
@@ -93,7 +92,6 @@ impl EngineMonitor {
             spider_manager,
             pipeline_manager,
             shutdown_signal,
-            last_activity,
             config,
         );
         tui_monitor.run()

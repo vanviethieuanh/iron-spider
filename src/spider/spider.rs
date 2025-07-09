@@ -10,6 +10,9 @@ pub struct SpiderState {
     // in-flight request counts
     pub in_flight_requests: AtomicUsize,
 
+    // in-flight parsing
+    pub in_flight_parse: AtomicUsize,
+
     // Count of all created requests
     pub created_requests: AtomicUsize,
 }
@@ -18,12 +21,16 @@ impl SpiderState {
     pub fn new() -> Self {
         Self {
             in_flight_requests: AtomicUsize::new(0),
+            in_flight_parse: AtomicUsize::new(0),
             created_requests: AtomicUsize::new(0),
         }
     }
 
     pub fn is_activated(&self) -> bool {
-        self.in_flight_requests.load(Ordering::Relaxed) > 0
+        let requests = self.in_flight_requests.load(Ordering::Relaxed);
+        let parsing = self.in_flight_parse.load(Ordering::Relaxed);
+
+        requests + parsing > 0
     }
 }
 

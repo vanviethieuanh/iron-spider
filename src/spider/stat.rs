@@ -9,6 +9,7 @@ pub struct SpiderManagerStats {
     pub pending_spiders: usize,
     pub closed_spiders: usize,
     pub active_spiders: usize,
+    pub running_parse: usize,
 }
 
 impl fmt::Display for SpiderManagerStats {
@@ -34,7 +35,8 @@ impl fmt::Display for SpiderManagerStats {
             self.closed_spiders,
             self.closed_spiders as f64 / total * 100.0
         )?;
-        writeln!(f, "Dropped Responses   : {:>5}", self.dropped_responses)
+        writeln!(f, "Dropped Responses   : {:>5}", self.dropped_responses)?;
+        writeln!(f, "Parse threads       : {:>5}", self.running_parse)
     }
 }
 
@@ -42,6 +44,7 @@ pub(crate) struct SpiderManagerStatsTracker {
     spider_counts: usize,
     active_spiders: AtomicUsize,
     dropped_responses: AtomicUsize,
+    running_parse: AtomicUsize,
 }
 
 impl SpiderManagerStatsTracker {
@@ -50,7 +53,23 @@ impl SpiderManagerStatsTracker {
             spider_counts,
             active_spiders: AtomicUsize::new(0),
             dropped_responses: AtomicUsize::new(0),
+            running_parse: AtomicUsize::new(0),
         }
+    }
+
+    pub(super) fn any_parse_threads(&self) -> bool {
+        let running_parse = self.running_parse.load(Ordering::Relaxed);
+        debug!("Running parse: {}", running_parse);
+        running_parse > 0
+    }
+
+    pub(super) fn parse_thread_started(&self) {
+        self.running_parse.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(super) fn parse_thread_finished(&self) {
+        debug_assert!(self.running_parse.load(Ordering::Relaxed) > 0);
+        self.running_parse.fetch_sub(1, Ordering::Relaxed);
     }
 
     pub(super) fn activate_one_spider(&self) {
@@ -84,6 +103,7 @@ impl SpiderManagerStatsTracker {
             total_spiders: self.spider_counts,
             active_spiders: active,
             closed_spiders: self.spider_counts - pending_spider_count - active,
+            running_parse: self.running_parse.load(Ordering::Relaxed),
         }
     }
 }
