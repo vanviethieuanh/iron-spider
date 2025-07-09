@@ -56,3 +56,68 @@ fn main() {
     drop(engine);
 }
 ```
+
+Scrapy like spider implementation
+```rust
+impl Spider for ExampleSpider {
+    fn start_requests(&self) -> Vec<Request> {
+        (0..30)
+            .map(|_| {
+                let url = format!("http://127.0.0.1:5000/article/{}", 3)
+                    .parse::<Url>()
+                    .expect("Invalid URL");
+
+                RequestBuilder::new()
+                    .url(url)
+                    .method(reqwest::Method::GET)
+                    .build()
+                    .expect("Failed to build request")
+            })
+            .collect()
+    }
+
+    fn name(&self) -> &str {
+        "example_spider"
+    }
+
+    fn parse(&self, response: Response) -> SpiderResult {
+        if let Some(item) = response
+            .text()
+            .as_deref()
+            .and_then(ExampleSpider::parse_article_html)
+        {
+            match extract_number(item.title.as_str()) {
+                Some(i) => {
+                    self.mark_discovered(response.url.to_string());
+
+                    if i != 1 {
+                        let next_url_str = format!("./article/{}", i - 1);
+                        let next_url = response.url.join(&next_url_str).expect("Invalid next URL");
+
+                        let next_request = RequestBuilder::new()
+                            .url(next_url)
+                            .method(reqwest::Method::GET)
+                            .build()
+                            .expect("Failed to build next request");
+
+                        SpiderResult::Both {
+                            requests: vec![next_request],
+                            items: vec![Box::new(item)],
+                        }
+                    } else {
+                        SpiderResult::Items(vec![Box::new(item)])
+                    }
+                }
+                None => SpiderResult::None,
+            }
+        } else {
+            info!("Empty response");
+            SpiderResult::None
+        }
+    }
+
+    fn close(&self) {
+        info!("Heyyyyyy, I'm leaving!!!");
+    }
+}
+```
