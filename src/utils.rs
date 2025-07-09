@@ -26,7 +26,7 @@ pub fn human_duration(d: Duration) -> String {
     parts.join(" ")
 }
 
-pub fn format_number(n: u64) -> String {
+pub fn human_number(n: u64) -> String {
     const THOUSAND: f64 = 1_000.0;
     const MILLION: f64 = 1_000_000.0;
     const BILLION: f64 = 1_000_000_000.0;
