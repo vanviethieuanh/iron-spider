@@ -10,6 +10,7 @@ pub struct EngineConfig {
     pub downloader_connection_timeout: Duration,
     pub downloader_delay: Duration,
     pub downloader_request_quota: Option<Quota>,
+    pub store_cookies: bool,
     // TODO: implement download data quota
     pub user_agent: Option<String>,
 
@@ -48,6 +49,7 @@ impl Default for EngineConfig {
 
             show_tui: false,
             spider_manager_worker_threads: 4,
+            store_cookies: true,
         }
     }
 }
