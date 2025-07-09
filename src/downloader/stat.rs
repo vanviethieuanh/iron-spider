@@ -181,8 +181,11 @@ impl DownloaderStatsTracker {
         self.update_peak_queued(current + self.active_requests.load(Ordering::Relaxed));
     }
 
-    pub fn dec_waiting_inc_active(&self) {
+    pub fn dec_waiting(&self) {
         self.waiting_requests.fetch_sub(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_active(&self) {
         let current = self.active_requests.fetch_add(1, Ordering::Relaxed) + 1;
         self.update_peak_queued(current + self.waiting_requests.load(Ordering::Relaxed));
     }

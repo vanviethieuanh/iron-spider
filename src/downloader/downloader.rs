@@ -11,7 +11,7 @@ use governor::state::{InMemoryState, NotKeyed};
 use reqwest::{Client, Error, StatusCode, Url};
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::config::EngineConfig;
 use crate::downloader::stat::{DownloaderStats, DownloaderStatsTracker};
@@ -31,6 +31,7 @@ pub struct Downloader {
     limiter: Option<Arc<DownloaderLimiter>>,
     http_error_allow_codes: HashSet<StatusCode>,
     download_sem: Arc<Semaphore>,
+    max_retry_times: usize,
 
     stats_tracker: Arc<DownloaderStatsTracker>,
 
@@ -45,6 +46,7 @@ impl Downloader {
             Some(q) => Some(Arc::new(RateLimiter::direct(q))),
             None => None,
         };
+        let max_retry_times = engine_config.max_retry_times;
 
         let mut client_builder = Client::builder()
             .cookie_store(engine_config.store_cookies)
@@ -69,6 +71,7 @@ impl Downloader {
 
             stats_tracker: Arc::new(DownloaderStatsTracker::new()),
             max_waiting,
+            max_retry_times,
         })
     }
 
@@ -93,7 +96,11 @@ impl Downloader {
         rt.block_on(async {
             let mut join_set = tokio::task::JoinSet::new();
 
-            while !shutdown_signal.load(Ordering::Relaxed) {
+            loop {
+                if shutdown_signal.load(Ordering::Relaxed) {
+                    break;
+                }
+
                 if self.stats_tracker.get_waiting() >= self.max_waiting {
                     sleep(Duration::from_millis(10)).await;
                     continue;
@@ -120,10 +127,20 @@ impl Downloader {
                             http_error_allow_codes,
                             limiter,
                             stats_tracker,
+                            self.max_retry_times,
                         ));
                     }
                     None => {
                         sleep(Duration::from_millis(10)).await;
+                    }
+                }
+            }
+
+            while let Some(res) = join_set.join_next().await {
+                match res {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Downloader task failed: {:?}", e);
                     }
                 }
             }
@@ -140,56 +157,78 @@ impl Downloader {
         http_error_allow_codes: HashSet<StatusCode>,
         limiter: Option<Arc<DownloaderLimiter>>,
         stats_tracker: Arc<DownloaderStatsTracker>,
+        max_retry_times: usize,
     ) {
-        if let Some(limiter) = limiter.as_ref() {
-            debug!("Waiting for rate limiter!");
-            limiter.until_ready().await;
+        let mut attempt = 0;
+
+        loop {
+            if let Some(limiter) = limiter.as_ref() {
+                debug!("Waiting for rate limiter!");
+                limiter.until_ready().await;
+            }
+            let _permit = download_sem.acquire().await.unwrap();
+
+            if attempt == 0 {
+                stats_tracker.dec_waiting();
+            }
+
+            let actual_request = iron_req.request.clone();
+            let request_url = actual_request.url.clone();
+
+            stats_tracker.inc_active();
+            stats_tracker.inc_requests(actual_request.size());
+            let start_time = Instant::now();
+            let resp = client
+                .request(actual_request.method, actual_request.url)
+                .headers(actual_request.headers.unwrap_or_default())
+                .body(actual_request.body.unwrap_or_default())
+                .send()
+                .await;
+            let response_time = start_time.elapsed();
+
+            drop(_permit);
+            stats_tracker.dec_active_request();
+
+            let request_accepted = match resp {
+                Ok(r) => {
+                    Self::handle_response(
+                        Arc::new(iron_req.clone()),
+                        &resp_sender,
+                        &http_error_allow_codes,
+                        &stats_tracker,
+                        response_time,
+                        r,
+                    )
+                    .await
+                }
+                Err(e) => {
+                    Self::counter_error(e, &stats_tracker, &request_url);
+                    false
+                }
+            };
+
+            if request_accepted {
+                break;
+            } else {
+                warn!("Attempt {} failed for {} — retrying", attempt, request_url);
+                attempt += 1;
+            }
+
+            if attempt > max_retry_times {
+                error!("Max retry reached for {}", iron_req.request.url);
+                break;
+            } else {
+                tokio::time::sleep(Duration::from_millis(100 * (attempt + 1) as u64)).await;
+            }
         }
-        let _permit = download_sem.acquire().await.unwrap();
-
-        stats_tracker.dec_waiting_inc_active();
-
-        let actual_request = iron_req.request.clone();
-        let request_url = actual_request.url.clone();
-
-        stats_tracker.inc_requests(actual_request.size());
-        let start_time = Instant::now();
-        let resp = client
-            .request(actual_request.method, actual_request.url)
-            .headers(actual_request.headers.unwrap_or_default())
-            .body(actual_request.body.unwrap_or_default())
-            .send()
-            .await;
-        let response_time = start_time.elapsed();
-
-        drop(_permit);
-        stats_tracker.dec_active_request();
-
-        let _ = match resp {
-            Ok(r) => {
-                Self::handle_response(
-                    Arc::new(iron_req.clone()),
-                    resp_sender,
-                    http_error_allow_codes,
-                    &stats_tracker,
-                    response_time,
-                    r,
-                )
-                .await
-            }
-            Err(e) => {
-                Self::counter_error(e, &stats_tracker, &request_url);
-                false
-            }
-        };
 
         iron_req.registered_spider.request_finished();
     }
 
     async fn handle_response(
         iron_req: Arc<IronRequest>,
-        resp_sender: Sender<Response>,
-        http_error_allow_codes: HashSet<StatusCode>,
+        resp_sender: &Sender<Response>,
+        http_error_allow_codes: &HashSet<StatusCode>,
         stats_tracker: &Arc<DownloaderStatsTracker>,
         response_time: Duration,
         r: reqwest::Response,

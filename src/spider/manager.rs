@@ -163,14 +163,12 @@ impl SpiderManager {
 
                     self.thread_pool.spawn_fifo(move || {
                         stats_tracker.parse_thread_started();
+
                         let spider_result = response
                             .request
                             .registered_spider
                             .inner
                             .parse(response.clone());
-
-                        info!("Got result");
-
                         Self::handler_spider_result(
                             response,
                             item_sender,
@@ -179,11 +177,7 @@ impl SpiderManager {
                             spider_result,
                         );
 
-                        info!("Result handled");
-
                         stats_tracker.parse_thread_finished();
-
-                        info!("tracked");
                     });
                 }
                 Err(_) => {

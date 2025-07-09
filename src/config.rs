@@ -10,7 +10,9 @@ pub struct EngineConfig {
     pub downloader_connection_timeout: Duration,
     pub downloader_delay: Duration,
     pub downloader_request_quota: Option<Quota>,
+
     pub store_cookies: bool,
+    pub max_retry_times: usize,
     // TODO: implement download data quota
     pub user_agent: Option<String>,
 
@@ -37,6 +39,9 @@ impl Default for EngineConfig {
             downloader_connection_timeout: Duration::from_secs(3),
             downloader_delay: Duration::ZERO,
             downloader_request_quota: None,
+
+            store_cookies: true,
+            max_retry_times: 2,
             user_agent: Some("IronSpider/0.0.1".to_string()),
             http_error_allow_codes: allowed,
             concurrent_limit: 32,
@@ -49,7 +54,6 @@ impl Default for EngineConfig {
 
             show_tui: false,
             spider_manager_worker_threads: 4,
-            store_cookies: true,
         }
     }
 }
